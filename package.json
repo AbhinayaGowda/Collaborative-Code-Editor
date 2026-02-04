@@ -1,0 +1,15 @@
+{
+  "name": "collaborative-code-editor",
+  "version": "1.0.0",
+  "description": "Web-based collaborative code editor",
+  "main": "main.js",
+  "scripts": {
+    "start": "electron ."
+  },
+  "devDependencies": {
+    "electron": "^33.0.0"
+  },
+  "dependencies": {
+    "monaco-editor": "^0.55.1"
+  }
+}
