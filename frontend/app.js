@@ -38,6 +38,218 @@ function initApp() {
   const folderTree = document.getElementById('folder-tree');
   const recentProjectsList = document.getElementById('recent-projects-list');
 
+  // Collaboration state
+  const collabState = {
+    isActive: false,
+    role: null, // 'host' or 'guest'
+    roomId: null,
+    displayName: null,
+  };
+
+  // Generate a random room ID (8 characters, alphanumeric)
+  function generateRoomId() {
+    const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
+    let result = '';
+    for (let i = 0; i < 8; i++) {
+      result += chars.charAt(Math.floor(Math.random() * chars.length));
+    }
+    return result;
+  }
+
+  // Update collaboration status in status bar
+  function updateCollabStatus() {
+    const collabStatusEl = document.getElementById('collab-status');
+    if (!collabState.isActive) {
+      collabStatusEl.style.display = 'none';
+      return;
+    }
+    collabStatusEl.style.display = 'inline';
+    const roleText = collabState.role === 'host' ? 'Host' : 'Guest';
+    collabStatusEl.textContent = `Collaborating • ${roleText} • Room: ${collabState.roomId}`;
+    collabStatusEl.title = `Display name: ${collabState.displayName || 'Unknown'}`;
+  }
+
+  // Update Monaco editor read-only state based on role
+  function updateEditorReadOnly() {
+    if (!window.monacoEditor) return;
+    const isReadOnly = collabState.isActive && collabState.role === 'guest';
+    window.monacoEditor.updateOptions({ readOnly: isReadOnly });
+    if (isReadOnly) {
+      window.monacoEditor.updateOptions({ 
+        readOnlyMessage: { value: 'You are a guest. Only the host can edit.' }
+      });
+    }
+  }
+
+  // Initialize collaboration UI handlers
+  function initCollaboration() {
+    const startCollabBtn = document.querySelector('.collab-btn-primary');
+    const joinRoomBtn = document.querySelector('.collab-btn:not(.collab-btn-primary)');
+    const modalBackdrop = document.querySelector('.collab-modal-backdrop');
+    const modalCloseBtn = document.querySelector('.collab-modal-close');
+    const modeTabs = document.querySelectorAll('.collab-mode-tab');
+    const startSection = document.querySelector('.collab-form-section-start');
+    const joinSection = document.querySelector('.collab-form-section-join');
+    const startActionBtn = document.querySelector('.collab-primary-action[data-action="start"]');
+    const joinActionBtn = document.querySelector('.collab-primary-action[data-action="join"]');
+    const cancelBtn = document.querySelector('.collab-secondary-action');
+    const displayNameStartInput = document.getElementById('collab-display-name-start');
+    const roomNameInput = document.getElementById('collab-room-name');
+    const displayNameJoinInput = document.getElementById('collab-display-name-join');
+    const roomIdInput = document.getElementById('collab-room-id');
+
+    // Show modal
+    function showModal(mode) {
+      modalBackdrop.classList.remove('collab-modal-hidden');
+      modalBackdrop.setAttribute('aria-hidden', 'false');
+      if (mode === 'join') {
+        switchToJoinMode();
+      } else {
+        switchToStartMode();
+      }
+    }
+
+    // Hide modal
+    function hideModal() {
+      modalBackdrop.classList.add('collab-modal-hidden');
+      modalBackdrop.setAttribute('aria-hidden', 'true');
+      // Reset form
+      displayNameStartInput.value = '';
+      roomNameInput.value = '';
+      displayNameJoinInput.value = '';
+      roomIdInput.value = '';
+    }
+
+    // Switch to "Start" mode
+    function switchToStartMode() {
+      modeTabs.forEach(tab => {
+        if (tab.dataset.mode === 'start') {
+          tab.classList.add('collab-mode-tab-active');
+          tab.setAttribute('aria-selected', 'true');
+        } else {
+          tab.classList.remove('collab-mode-tab-active');
+          tab.setAttribute('aria-selected', 'false');
+        }
+      });
+      startSection.style.display = 'flex';
+      joinSection.style.display = 'none';
+      startActionBtn.style.display = 'inline-block';
+      joinActionBtn.style.display = 'none';
+    }
+
+    // Switch to "Join" mode
+    function switchToJoinMode() {
+      modeTabs.forEach(tab => {
+        if (tab.dataset.mode === 'join') {
+          tab.classList.add('collab-mode-tab-active');
+          tab.setAttribute('aria-selected', 'true');
+        } else {
+          tab.classList.remove('collab-mode-tab-active');
+          tab.setAttribute('aria-selected', 'false');
+        }
+      });
+      startSection.style.display = 'none';
+      joinSection.style.display = 'flex';
+      startActionBtn.style.display = 'none';
+      joinActionBtn.style.display = 'inline-block';
+    }
+
+    // Start collaboration
+    function startCollaboration() {
+      const displayName = displayNameStartInput.value.trim();
+      if (!displayName) {
+        showStatus('Please enter a display name', true);
+        return;
+      }
+
+      const roomId = generateRoomId();
+      collabState.isActive = true;
+      collabState.role = 'host';
+      collabState.roomId = roomId;
+      collabState.displayName = displayName;
+
+      updateCollabStatus();
+      updateEditorReadOnly();
+      hideModal();
+      showStatus(`Collaboration started! Room ID: ${roomId}`, false);
+    }
+
+    // Join room
+    function joinRoom() {
+      const displayName = displayNameJoinInput.value.trim();
+      const roomId = roomIdInput.value.trim().toUpperCase();
+
+      if (!displayName) {
+        showStatus('Please enter a display name', true);
+        return;
+      }
+      if (!roomId) {
+        showStatus('Please enter a room ID', true);
+        return;
+      }
+      if (roomId.length !== 8) {
+        showStatus('Room ID must be 8 characters', true);
+        return;
+      }
+
+      collabState.isActive = true;
+      collabState.role = 'guest';
+      collabState.roomId = roomId;
+      collabState.displayName = displayName;
+
+      updateCollabStatus();
+      updateEditorReadOnly();
+      hideModal();
+      showStatus(`Joined room ${roomId} as guest`, false);
+    }
+
+    // Event listeners
+    startCollabBtn?.addEventListener('click', () => showModal('start'));
+    joinRoomBtn?.addEventListener('click', () => showModal('join'));
+    modalCloseBtn?.addEventListener('click', hideModal);
+    cancelBtn?.addEventListener('click', hideModal);
+    
+    // Close modal on backdrop click
+    modalBackdrop?.addEventListener('click', function(e) {
+      if (e.target === modalBackdrop) {
+        hideModal();
+      }
+    });
+
+    // Mode tab switching
+    modeTabs.forEach(tab => {
+      tab.addEventListener('click', function() {
+        if (tab.dataset.mode === 'start') {
+          switchToStartMode();
+        } else {
+          switchToJoinMode();
+        }
+      });
+    });
+
+    // Form submission
+    startActionBtn?.addEventListener('click', startCollaboration);
+    joinActionBtn?.addEventListener('click', joinRoom);
+
+    // Enter key to submit
+    [displayNameStartInput, roomNameInput, displayNameJoinInput, roomIdInput].forEach(input => {
+      if (input) {
+        input.addEventListener('keydown', function(e) {
+          if (e.key === 'Enter') {
+            if (startSection.style.display !== 'none') {
+              startActionBtn.click();
+            } else {
+              joinActionBtn.click();
+            }
+          }
+        });
+      }
+    });
+  }
+
+  // Initialize collaboration handlers
+  initCollaboration();
+
   let currentFolderRoot = null;
 
   function renderRecentProjects(paths) {

@@ -238,6 +238,10 @@ body {
   gap: 8px;
 }
 
+.tab-bar-spacer {
+  flex: 1;
+}
+
 .open-file-btn,
 .open-folder-btn {
   font-size: 13px;
@@ -312,6 +316,42 @@ body {
   border-color: #2d2d2d;
   border-bottom: 1px solid #1e1e1e;
   margin-bottom: -1px;
+}
+
+/* ---- Collaboration toolbar ---- */
+.collab-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-left: auto;
+}
+
+.collab-btn {
+  font-size: 12px;
+  padding: 4px 10px;
+  border-radius: 4px;
+  border: 1px solid #3c3c3c;
+  background-color: #2d2d2d;
+  color: #cccccc;
+  cursor: pointer;
+  white-space: nowrap;
+  -webkit-app-region: no-drag;
+}
+
+.collab-btn:hover {
+  background-color: #3c3c3c;
+  color: #ffffff;
+}
+
+.collab-btn-primary {
+  background-color: #0e639c;
+  border-color: #0e639c;
+  color: #ffffff;
+}
+
+.collab-btn-primary:hover {
+  background-color: #1177bb;
+  border-color: #1177bb;
 }
 
 /* ---- Editor area ---- */
@@ -427,4 +467,209 @@ body {
 
 .status-error {
   color: #f48771;
+}
+
+.status-item#collab-status {
+  color: #4ec9b0;
+  font-weight: 500;
+  cursor: help;
+}
+
+/* ---- Collaboration modal ---- */
+.collab-modal-backdrop {
+  position: fixed;
+  inset: 0;
+  background-color: rgba(0, 0, 0, 0.5);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 40;
+}
+
+.collab-modal-hidden {
+  display: none;
+}
+
+.collab-modal {
+  width: 480px;
+  max-width: calc(100% - 48px);
+  background-color: #252526;
+  border-radius: 6px;
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.6);
+  border: 1px solid #3c3c3c;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.collab-modal-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  padding: 12px 16px 8px;
+  background-color: #2d2d2d;
+  border-bottom: 1px solid #3c3c3c;
+}
+
+.collab-modal-title-group {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.collab-modal-title {
+  font-size: 14px;
+  font-weight: 500;
+  color: #ffffff;
+}
+
+.collab-modal-subtitle {
+  font-size: 12px;
+  color: #a0a0a0;
+}
+
+.collab-modal-close {
+  border: none;
+  background: transparent;
+  color: #a0a0a0;
+  font-size: 16px;
+  line-height: 1;
+  cursor: pointer;
+  padding: 2px 4px;
+}
+
+.collab-modal-close:hover {
+  color: #ffffff;
+  background-color: #3c3c3c;
+  border-radius: 3px;
+}
+
+.collab-modal-body {
+  padding: 12px 16px 14px;
+  background-color: #252526;
+}
+
+.collab-mode-tabs {
+  display: inline-flex;
+  padding: 2px;
+  border-radius: 4px;
+  background-color: #1e1e1e;
+  border: 1px solid #3c3c3c;
+  margin-bottom: 12px;
+}
+
+.collab-mode-tab {
+  font-size: 12px;
+  padding: 4px 10px;
+  border-radius: 3px;
+  border: none;
+  background: transparent;
+  color: #a0a0a0;
+  cursor: pointer;
+}
+
+.collab-mode-tab:hover {
+  background-color: #2d2d2d;
+  color: #ffffff;
+}
+
+.collab-mode-tab-active {
+  background-color: #0e639c;
+  color: #ffffff;
+}
+
+.collab-form {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.collab-form-section {
+  display: none;
+  flex-direction: column;
+  gap: 10px;
+}
+
+/* By default, show the "Start" section and primary Start button.
+   App logic can toggle visibility by adding/removing these classes. */
+.collab-form-section-start {
+  display: flex;
+}
+
+.collab-field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.collab-label {
+  font-size: 12px;
+  color: #cccccc;
+}
+
+.collab-input {
+  font-size: 13px;
+  padding: 6px 8px;
+  border-radius: 3px;
+  border: 1px solid #3c3c3c;
+  background-color: #1e1e1e;
+  color: #e0e0e0;
+  outline: none;
+}
+
+.collab-input::placeholder {
+  color: #6a6a6a;
+}
+
+.collab-input:focus {
+  border-color: #007acc;
+  box-shadow: 0 0 0 1px rgba(0, 122, 204, 0.4);
+}
+
+.collab-hint {
+  font-size: 11px;
+  color: #858585;
+}
+
+.collab-modal-footer {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 4px;
+}
+
+.collab-primary-action,
+.collab-secondary-action {
+  font-size: 12px;
+  padding: 6px 12px;
+  border-radius: 4px;
+  cursor: pointer;
+  border: 1px solid transparent;
+}
+
+.collab-primary-action {
+  background-color: #0e639c;
+  border-color: #0e639c;
+  color: #ffffff;
+}
+
+.collab-primary-action:hover {
+  background-color: #1177bb;
+  border-color: #1177bb;
+}
+
+.collab-primary-action-join {
+  display: none;
+}
+
+.collab-secondary-action {
+  background-color: #2d2d2d;
+  border-color: #3c3c3c;
+  color: #cccccc;
+}
+
+.collab-secondary-action:hover {
+  background-color: #3c3c3c;
+  color: #ffffff;
 }
