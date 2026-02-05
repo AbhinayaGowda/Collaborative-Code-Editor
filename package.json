@@ -4,12 +4,14 @@
   "description": "Web-based collaborative code editor",
   "main": "main.js",
   "scripts": {
-    "start": "electron ."
+    "start": "electron .",
+    "collab-server": "node collab-server.js"
   },
   "devDependencies": {
     "electron": "^33.0.0"
   },
   "dependencies": {
-    "monaco-editor": "^0.55.1"
+    "monaco-editor": "^0.55.1",
+    "ws": "^8.19.0"
   }
 }

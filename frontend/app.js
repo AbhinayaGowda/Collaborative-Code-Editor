@@ -44,6 +44,9 @@ function initApp() {
     role: null, // 'host' or 'guest'
     roomId: null,
     displayName: null,
+    ws: null, // WebSocket connection
+    isApplyingRemoteUpdate: false, // Flag to prevent feedback loops
+    serverUrl: 'ws://localhost:8080', // Default server URL
   };
 
   // Generate a random room ID (8 characters, alphanumeric)
@@ -81,8 +84,198 @@ function initApp() {
     }
   }
 
+  // WebSocket connection management
+  function connectWebSocket() {
+    if (collabState.ws && collabState.ws.readyState === WebSocket.OPEN) {
+      console.log('[Collab] WebSocket already connected');
+      return;
+    }
+
+    try {
+      console.log(`[Collab] Connecting to ${collabState.serverUrl}...`);
+      const ws = new WebSocket(collabState.serverUrl);
+
+      ws.onopen = function() {
+        console.log('[Collab] WebSocket connected');
+        // Join room after connection is established
+        if (collabState.roomId && collabState.displayName) {
+          joinRoomViaWebSocket();
+        }
+      };
+
+      ws.onmessage = function(event) {
+        try {
+          const message = JSON.parse(event.data);
+          handleWebSocketMessage(message);
+        } catch (error) {
+          console.error('[Collab] Failed to parse WebSocket message:', error);
+        }
+      };
+
+      ws.onerror = function(error) {
+        console.error('[Collab] WebSocket error:', error);
+        showStatus('Connection error. Check if server is running.', true);
+      };
+
+      ws.onclose = function() {
+        console.log('[Collab] WebSocket closed');
+        collabState.ws = null;
+        // Attempt reconnection if collaboration is still active
+        if (collabState.isActive) {
+          console.log('[Collab] Attempting to reconnect...');
+          setTimeout(connectWebSocket, 2000);
+        }
+      };
+
+      collabState.ws = ws;
+    } catch (error) {
+      console.error('[Collab] Failed to create WebSocket:', error);
+      showStatus('Failed to connect to collaboration server', true);
+    }
+  }
+
+  function disconnectWebSocket() {
+    if (collabState.ws) {
+      // Send leave message before closing
+      if (collabState.ws.readyState === WebSocket.OPEN && collabState.roomId) {
+        collabState.ws.send(JSON.stringify({
+          type: 'leave',
+          roomId: collabState.roomId
+        }));
+      }
+      collabState.ws.close();
+      collabState.ws = null;
+    }
+  }
+
+  function joinRoomViaWebSocket() {
+    if (!collabState.ws || collabState.ws.readyState !== WebSocket.OPEN) {
+      console.warn('[Collab] Cannot join room: WebSocket not connected');
+      return;
+    }
+
+    if (!collabState.roomId || !collabState.displayName) {
+      console.warn('[Collab] Cannot join room: missing roomId or displayName');
+      return;
+    }
+
+    console.log(`[Collab] Joining room ${collabState.roomId} as ${collabState.displayName}`);
+    collabState.ws.send(JSON.stringify({
+      type: 'join',
+      roomId: collabState.roomId,
+      displayName: collabState.displayName
+    }));
+  }
+
+  function handleWebSocketMessage(message) {
+    const { type, roomId, content, userId, displayName } = message;
+
+    switch (type) {
+      case 'connected':
+        console.log('[Collab] Server confirmed connection, userId:', message.userId);
+        // If we're already in a room, join it now
+        if (collabState.roomId && collabState.displayName) {
+          joinRoomViaWebSocket();
+        }
+        break;
+
+      case 'joined':
+        console.log(`[Collab] Successfully joined room: ${roomId}`);
+        showStatus(`Connected to room ${roomId}`, false);
+        break;
+
+      case 'editor-update':
+        // Apply remote editor update (only if not from our own change)
+        if (content !== undefined && !collabState.isApplyingRemoteUpdate) {
+          applyRemoteEditorUpdate(content);
+        }
+        break;
+
+      case 'user-joined':
+        console.log(`[Collab] User joined: ${displayName} (${userId})`);
+        showStatus(`${displayName} joined the room`, false);
+        break;
+
+      case 'user-left':
+        console.log(`[Collab] User left: ${displayName} (${userId})`);
+        showStatus(`${displayName} left the room`, false);
+        break;
+
+      case 'error':
+        console.error('[Collab] Server error:', message.message);
+        showStatus(`Server error: ${message.message}`, true);
+        break;
+
+      default:
+        console.warn('[Collab] Unknown message type:', type);
+    }
+  }
+
+  function applyRemoteEditorUpdate(content) {
+    if (!window.monacoEditor) return;
+
+    // Set flag to prevent feedback loop
+    collabState.isApplyingRemoteUpdate = true;
+
+    try {
+      // Get current cursor position to restore it after update
+      const position = window.monacoEditor.getPosition();
+      
+      // Apply the remote content (simple full document replace)
+      window.monacoEditor.setValue(content || '');
+
+      // Restore cursor position if possible
+      if (position) {
+        const model = window.monacoEditor.getModel();
+        if (model && model.getLineCount() >= position.lineNumber) {
+          window.monacoEditor.setPosition(position);
+        }
+      }
+    } catch (error) {
+      console.error('[Collab] Error applying remote update:', error);
+    } finally {
+      // Reset flag after a short delay to allow any queued updates
+      setTimeout(() => {
+        collabState.isApplyingRemoteUpdate = false;
+      }, 100);
+    }
+  }
+
+  // Setup Monaco editor change listener for collaboration
+  function setupMonacoCollaboration() {
+    if (!window.monacoEditor) {
+      console.warn('[Collab] Monaco editor not available for collaboration setup');
+      return;
+    }
+
+    // Listen for editor content changes
+    window.monacoEditor.onDidChangeModelContent(function(event) {
+      // Only broadcast if collaboration is active and we're not applying a remote update
+      if (collabState.isActive && !collabState.isApplyingRemoteUpdate && collabState.ws) {
+        const content = window.monacoEditor.getValue();
+        
+        // Only send if WebSocket is open
+        if (collabState.ws.readyState === WebSocket.OPEN && collabState.roomId) {
+          collabState.ws.send(JSON.stringify({
+            type: 'editor-change',
+            roomId: collabState.roomId,
+            content: content
+          }));
+        }
+      }
+    });
+
+    console.log('[Collab] Monaco editor collaboration listener set up');
+  }
+
   // Initialize collaboration UI handlers
   function initCollaboration() {
+    // Ensure DOM is fully loaded before querying elements
+    if (document.readyState === 'loading') {
+      document.addEventListener('DOMContentLoaded', initCollaboration);
+      return;
+    }
+
     const startCollabBtn = document.querySelector('.collab-btn-primary');
     const joinRoomBtn = document.querySelector('.collab-btn:not(.collab-btn-primary)');
     const modalBackdrop = document.querySelector('.collab-modal-backdrop');
@@ -91,12 +284,18 @@ function initApp() {
     const startSection = document.querySelector('.collab-form-section-start');
     const joinSection = document.querySelector('.collab-form-section-join');
     const startActionBtn = document.querySelector('.collab-primary-action[data-action="start"]');
-    const joinActionBtn = document.querySelector('.collab-primary-action[data-action="join"]');
+    const joinActionBtn = document.querySelector('.collab-primary-action-join');
     const cancelBtn = document.querySelector('.collab-secondary-action');
     const displayNameStartInput = document.getElementById('collab-display-name-start');
     const roomNameInput = document.getElementById('collab-room-name');
     const displayNameJoinInput = document.getElementById('collab-display-name-join');
     const roomIdInput = document.getElementById('collab-room-id');
+
+    // Verify critical elements exist
+    if (!joinActionBtn) {
+      console.error('[Collab] Join button not found. Modal may not be loaded yet.');
+      return;
+    }
 
     // Show modal
     function showModal(mode) {
@@ -171,11 +370,19 @@ function initApp() {
       updateCollabStatus();
       updateEditorReadOnly();
       hideModal();
+      
+      // Connect to WebSocket server
+      connectWebSocket();
+      
+      // Setup Monaco collaboration if editor is ready
+      setupMonacoCollaboration();
+      
       showStatus(`Collaboration started! Room ID: ${roomId}`, false);
     }
 
     // Join room
     function joinRoom() {
+      console.log('[Collab] joinRoom() called - Join button clicked');
       const displayName = displayNameJoinInput.value.trim();
       const roomId = roomIdInput.value.trim().toUpperCase();
 
@@ -200,7 +407,14 @@ function initApp() {
       updateCollabStatus();
       updateEditorReadOnly();
       hideModal();
-      showStatus(`Joined room ${roomId} as guest`, false);
+      
+      // Connect to WebSocket server
+      connectWebSocket();
+      
+      // Setup Monaco collaboration if editor is ready
+      setupMonacoCollaboration();
+      
+      showStatus(`Joining room ${roomId}...`, false);
     }
 
     // Event listeners
@@ -249,6 +463,16 @@ function initApp() {
 
   // Initialize collaboration handlers
   initCollaboration();
+
+  // Setup Monaco collaboration when editor is ready
+  if (window.monacoEditor) {
+    setupMonacoCollaboration();
+  } else {
+    // Wait for Monaco to be ready
+    window.addEventListener('monaco-ready', function() {
+      setupMonacoCollaboration();
+    });
+  }
 
   let currentFolderRoot = null;
 
