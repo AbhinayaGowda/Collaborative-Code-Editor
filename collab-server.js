@@ -73,6 +73,22 @@ function handleMessage(ws, userId, data) {
       // Client reports an attempted bypass (e.g. unapproved WS reconnect trick)
       logIntruder(ws, userId, displayName || 'Unknown', 'client-reported bypass');
       break;
+    case 'chat-message':
+      // Live chat message from any participant inside the room
+      handleChatMessage(ws, data);
+      break;
+    case 'inline-comment':
+      // Inline code comment: anchored to a specific line number in the editor
+      handleInlineComment(ws, data);
+      break;
+    case 'inline-comment-reply':
+      // Reply to an existing inline comment thread
+      handleInlineCommentReply(ws, data);
+      break;
+    case 'inline-comment-resolve':
+      // Host or comment author marks a thread resolved
+      handleInlineCommentResolve(ws, data);
+      break;
     default:
       console.warn(`[Server] Unknown message type: ${type} from ${userId}`);
   }
@@ -127,14 +143,41 @@ function handleJoin(ws, userId, roomId, displayName) {
     return;
   }
 
-  waitingUsers.set(userId, { ws, roomId, displayName, requestedAt: new Date().toISOString() });
-
-  hostWs.send(JSON.stringify({
-    type: 'join-request',
+  waitingUsers.set(userId, {
+    ws,
     socketId: userId,
+    roomId,
     displayName,
     requestedAt: new Date().toISOString(),
-  }));
+  });
+
+  // Fix 3: clean up waiting entry if viewer disconnects before approval (ghost socket prevention)
+  ws.once('close', () => {
+    if (waitingUsers.has(userId)) {
+      waitingUsers.delete(userId);
+      // Notify host the pending request is now void
+      if (hostWs.readyState === WebSocket.OPEN) {
+        hostWs.send(JSON.stringify({
+          type: 'request-expired',
+          socketId: userId,
+          reason: 'User disconnected while waiting',
+        }));
+      }
+    }
+  });
+
+  // Fix 1: delay 300ms so host frontend has time to process its own 'joined'
+  // message and set collabState.role = 'host' before receiving join-request
+  setTimeout(() => {
+    if (hostWs.readyState === WebSocket.OPEN && waitingUsers.has(userId)) {
+      hostWs.send(JSON.stringify({
+        type: 'join-request',
+        socketId: userId,
+        displayName,
+        requestedAt: new Date().toISOString(),
+      }));
+    }
+  }, 300);
 
   ws.send(JSON.stringify({ type: 'waiting', message: 'Waiting for host approval…' }));
 }
@@ -176,6 +219,8 @@ function approveUser(hostWs, requestId) {
   addUserToRoom(ws, roomId, displayName, 'Viewer', requestId);
 
   ws.send(JSON.stringify({ type: 'joined', role: 'Viewer' }));
+  // Send existing chat history and inline comments to the newly joined user
+  sendSessionHistory(ws, roomId);
   sendParticipants(roomId);
   waitingUsers.delete(requestId);
 }
@@ -220,6 +265,7 @@ function handleSetPermission(hostWs, targetUserId, permission) {
   }
 
   const roomId = hostInfo.roomId;
+  // Declare usersInRoom here — was missing previously causing a ReferenceError
   const usersInRoom = roomUsers.get(roomId);
   if (!usersInRoom) return;
 
@@ -245,7 +291,10 @@ function handleSetPermission(hostWs, targetUserId, permission) {
 
   const newRole = permission === 'edit' ? 'Editor' : 'Viewer';
   targetInfo.role = newRole;
+  // Fix 4: update both userInfo AND roomUsers so participants-update
+  // broadcasts the correct role — prevents frontend from re-locking editor
   userInfo.get(targetWs).role = newRole;
+  roomUsers.get(roomId).set(targetWs, targetInfo);
 
   // Notify the affected user
   targetWs.send(JSON.stringify({
@@ -254,6 +303,156 @@ function handleSetPermission(hostWs, targetUserId, permission) {
   }));
 
   sendParticipants(roomId);
+}
+
+// ─── Chat ─────────────────────────────────────────────────────────────────────
+
+// roomId → Array<{ id, userId, displayName, text, sentAt }>
+const chatHistory = new Map();
+
+function handleChatMessage(ws, data) {
+  const info = userInfo.get(ws);
+  // Only participants who are fully inside the room can chat
+  if (!info) return;
+
+  const { text } = data;
+  if (!text || typeof text !== 'string' || !text.trim()) return;
+
+  const message = {
+    id: `msg-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+    userId: ws.userId,
+    displayName: info.displayName,
+    text: text.trim().slice(0, 2000), // hard cap at 2000 chars
+    sentAt: new Date().toISOString(),
+  };
+
+  // Persist in memory for the session so late joiners can receive history
+  if (!chatHistory.has(info.roomId)) chatHistory.set(info.roomId, []);
+  const history = chatHistory.get(info.roomId);
+  history.push(message);
+  // Cap history at 200 messages to avoid unbounded growth
+  if (history.length > 200) history.shift();
+
+  // Broadcast to EVERYONE in the room including sender (so sender sees it confirmed)
+  broadcastToRoom(info.roomId, null, {
+    type: 'chat-message',
+    message,
+  });
+}
+
+// ─── Inline Comments ──────────────────────────────────────────────────────────
+
+// roomId → Map<commentId, { id, userId, displayName, lineNumber, text, createdAt, resolved, replies[] }>
+const inlineComments = new Map();
+
+function handleInlineComment(ws, data) {
+  const info = userInfo.get(ws);
+  if (!info) return;
+
+  const { lineNumber, text } = data;
+  if (typeof lineNumber !== 'number' || lineNumber < 1) return;
+  if (!text || typeof text !== 'string' || !text.trim()) return;
+
+  const comment = {
+    id: `cmt-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+    userId: ws.userId,
+    displayName: info.displayName,
+    lineNumber,
+    text: text.trim().slice(0, 1000),
+    createdAt: new Date().toISOString(),
+    resolved: false,
+    replies: [],
+  };
+
+  if (!inlineComments.has(info.roomId)) inlineComments.set(info.roomId, new Map());
+  inlineComments.get(info.roomId).set(comment.id, comment);
+
+  // Broadcast new comment to all participants including sender
+  broadcastToRoom(info.roomId, null, {
+    type: 'inline-comment-new',
+    comment,
+  });
+}
+
+function handleInlineCommentReply(ws, data) {
+  const info = userInfo.get(ws);
+  if (!info) return;
+
+  const { commentId, text } = data;
+  if (!commentId || !text || typeof text !== 'string' || !text.trim()) return;
+
+  const roomComments = inlineComments.get(info.roomId);
+  if (!roomComments) return;
+
+  const comment = roomComments.get(commentId);
+  if (!comment) return;
+  if (comment.resolved) {
+    // Don't allow replies on resolved threads
+    sendError(ws, 'Cannot reply to a resolved comment thread');
+    return;
+  }
+
+  const reply = {
+    id: `rpl-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+    userId: ws.userId,
+    displayName: info.displayName,
+    text: text.trim().slice(0, 1000),
+    sentAt: new Date().toISOString(),
+  };
+
+  comment.replies.push(reply);
+
+  broadcastToRoom(info.roomId, null, {
+    type: 'inline-comment-reply',
+    commentId,
+    reply,
+  });
+}
+
+function handleInlineCommentResolve(ws, data) {
+  const info = userInfo.get(ws);
+  if (!info) return;
+
+  const { commentId } = data;
+  if (!commentId) return;
+
+  const roomComments = inlineComments.get(info.roomId);
+  if (!roomComments) return;
+
+  const comment = roomComments.get(commentId);
+  if (!comment) return;
+
+  // Only the comment author or the host can resolve
+  if (comment.userId !== ws.userId && info.role !== 'Host') {
+    sendError(ws, 'Only the comment author or host can resolve this thread');
+    return;
+  }
+
+  comment.resolved = true;
+
+  broadcastToRoom(info.roomId, null, {
+    type: 'inline-comment-resolved',
+    commentId,
+    resolvedBy: info.displayName,
+  });
+}
+
+// Send full chat history + inline comments to a newly joined user
+function sendSessionHistory(ws, roomId) {
+  // Chat history
+  const history = chatHistory.get(roomId) || [];
+  if (history.length > 0) {
+    ws.send(JSON.stringify({ type: 'chat-history', messages: history }));
+  }
+
+  // Inline comment dump (only unresolved ones)
+  const roomComments = inlineComments.get(roomId);
+  if (roomComments && roomComments.size > 0) {
+    const comments = [...roomComments.values()].filter(c => !c.resolved);
+    if (comments.length > 0) {
+      ws.send(JSON.stringify({ type: 'inline-comments-dump', comments }));
+    }
+  }
 }
 
 function handleRemoveParticipant(hostWs, targetUserId) {
@@ -266,7 +465,6 @@ function handleRemoveParticipant(hostWs, targetUserId) {
   const roomId = hostInfo.roomId;
   const usersInRoom = roomUsers.get(roomId);
   if (!usersInRoom) return;
-
   let targetWs = null;
   usersInRoom.forEach((info, ws) => {
     if (info.userId === targetUserId) targetWs = ws;
@@ -425,6 +623,8 @@ function removeUserFromRoom(ws) {
     roomUsers.delete(roomId);
     roomHosts.delete(roomId);
     intruderLog.delete(roomId);
+    chatHistory.delete(roomId);
+    inlineComments.delete(roomId);
     return;
   }
 

@@ -105,8 +105,440 @@ function initApp() {
     document.body.appendChild(container);
   }
 
+  // ─── Chat Box ──────────────────────────────────────────────────────────────
+  // A floating panel docked to the bottom-right (above the status bar).
+  // Visible only when a collaboration session is active.
+
+  function injectChatBox() {
+    if (document.getElementById('collab-chat')) return;
+
+    const chat = document.createElement('div');
+    chat.id = 'collab-chat';
+    chat.className = 'collab-chat collab-chat-hidden';
+    chat.setAttribute('aria-label', 'Collaboration Chat');
+    chat.innerHTML = `
+      <div class="chat-header" id="chat-header">
+        <span class="chat-title">💬 Room Chat</span>
+        <div class="chat-header-actions">
+          <span class="chat-unread-badge" id="chat-unread-badge" hidden>0</span>
+          <button type="button" class="chat-toggle-btn" id="chat-toggle-btn" title="Minimise chat">─</button>
+          <button type="button" class="chat-close-btn" id="chat-close-btn" title="Close chat">✕</button>
+        </div>
+      </div>
+      <div class="chat-body" id="chat-body">
+        <div class="chat-messages" id="chat-messages"></div>
+        <div class="chat-input-row">
+          <textarea
+            id="chat-input"
+            class="chat-input"
+            rows="1"
+            placeholder="Message the room… (Enter to send)"
+            maxlength="2000"
+            autocomplete="off"
+            spellcheck="true"
+          ></textarea>
+          <button type="button" class="chat-send-btn" id="chat-send-btn" title="Send">➤</button>
+        </div>
+      </div>
+    `;
+    document.body.appendChild(chat);
+
+    // ── Toggle minimise ──
+    let chatMinimised = false;
+    const chatBody = chat.querySelector('#chat-body');
+    const toggleBtn = chat.querySelector('#chat-toggle-btn');
+    toggleBtn.addEventListener('click', () => {
+      chatMinimised = !chatMinimised;
+      chatBody.style.display = chatMinimised ? 'none' : '';
+      toggleBtn.textContent = chatMinimised ? '▲' : '─';
+      if (!chatMinimised) clearUnreadBadge();
+    });
+
+    // ── Close hides the chat (doesn't end session) ──
+    chat.querySelector('#chat-close-btn').addEventListener('click', () => {
+      chat.classList.add('collab-chat-hidden');
+    });
+
+    // ── Send message ──
+    const chatInput = chat.querySelector('#chat-input');
+    const sendBtn = chat.querySelector('#chat-send-btn');
+
+    function sendChatMessage() {
+      if (!collabState.isActive) return;
+      const text = chatInput.value.trim();
+      if (!text) return;
+      sendWs({ type: 'chat-message', text });
+      chatInput.value = '';
+      chatInput.style.height = 'auto';
+    }
+
+    sendBtn.addEventListener('click', sendChatMessage);
+
+    // Enter sends, Shift+Enter inserts newline
+    chatInput.addEventListener('keydown', e => {
+      if (e.key === 'Enter' && !e.shiftKey) {
+        e.preventDefault();
+        sendChatMessage();
+      }
+    });
+
+    // Auto-grow textarea up to 5 lines
+    chatInput.addEventListener('input', () => {
+      chatInput.style.height = 'auto';
+      chatInput.style.height = Math.min(chatInput.scrollHeight, 100) + 'px';
+    });
+  }
+
+  // Unread badge — shown when chat is minimised and new messages arrive
+  let unreadCount = 0;
+  function clearUnreadBadge() {
+    unreadCount = 0;
+    const badge = document.getElementById('chat-unread-badge');
+    if (badge) { badge.textContent = '0'; badge.hidden = true; }
+  }
+  function incrementUnreadBadge() {
+    unreadCount++;
+    const badge = document.getElementById('chat-unread-badge');
+    if (badge) { badge.textContent = unreadCount; badge.hidden = false; }
+  }
+
+  // Append a single chat message bubble to the messages list
+  function appendChatMessage(msg, isHistory) {
+    const messagesEl = document.getElementById('chat-messages');
+    if (!messagesEl) return;
+
+    const isMe = msg.userId === undefined
+      ? msg.displayName === collabState.displayName  // fallback for history
+      : msg.displayName === collabState.displayName;
+
+    const bubble = document.createElement('div');
+    bubble.className = `chat-bubble ${isMe ? 'chat-bubble-me' : 'chat-bubble-them'}`;
+    bubble.dataset.msgId = msg.id;
+
+    bubble.innerHTML = `
+      ${!isMe ? `<span class="chat-sender">${escHtml(msg.displayName)}</span>` : ''}
+      <div class="chat-text">${escHtml(msg.text)}</div>
+      <span class="chat-time">${formatTime(msg.sentAt)}</span>
+    `;
+
+    messagesEl.appendChild(bubble);
+
+    // Auto-scroll to bottom
+    messagesEl.scrollTop = messagesEl.scrollHeight;
+
+    // If not history and chat is minimised → show unread badge
+    const chatEl = document.getElementById('collab-chat');
+    const chatBody = document.getElementById('chat-body');
+    if (!isHistory && chatBody && chatBody.style.display === 'none') {
+      incrementUnreadBadge();
+    }
+    // If chat is hidden entirely (closed), re-show it with a badge
+    if (!isHistory && chatEl && chatEl.classList.contains('collab-chat-hidden')) {
+      chatEl.classList.remove('collab-chat-hidden');
+      incrementUnreadBadge();
+    }
+  }
+
+  // Show/hide the chat box when collab starts/ends
+  function setChatVisible(visible) {
+    const chatEl = document.getElementById('collab-chat');
+    if (!chatEl) return;
+    if (visible) {
+      chatEl.classList.remove('collab-chat-hidden');
+      clearUnreadBadge();
+    } else {
+      chatEl.classList.add('collab-chat-hidden');
+      // Clear messages on session end
+      const msgs = document.getElementById('chat-messages');
+      if (msgs) msgs.innerHTML = '';
+    }
+  }
+
+  // ─── Inline Comments ───────────────────────────────────────────────────────
+  // Anchor small floating popover-style threads to editor line numbers.
+  // Uses Monaco's ViewZone API so the thread appears inline below the
+  // commented line without overlapping the code.
+
+  // commentId → { domNode, viewZoneId, data }
+  const inlineCommentWidgets = new Map();
+
+  function injectInlineCommentStyles() {
+    // Styles are included in the main injectCollabStyles() call below
+  }
+
+  // Render the full HTML for a comment thread
+  function buildCommentThreadHTML(comment) {
+    const repliesHTML = (comment.replies || []).map(r => `
+      <div class="ic-reply">
+        <span class="ic-reply-author">${escHtml(r.displayName)}</span>
+        <span class="ic-reply-text">${escHtml(r.text)}</span>
+        <span class="ic-reply-time">${formatTime(r.sentAt)}</span>
+      </div>
+    `).join('');
+
+    const canResolve = collabState.role === 'host' || comment.userId === collabState.displayName;
+    const resolvedCls = comment.resolved ? ' ic-resolved' : '';
+
+    return `
+      <div class="ic-thread${resolvedCls}" data-comment-id="${escHtml(comment.id)}">
+        <div class="ic-thread-header">
+          <span class="ic-line-label">Line ${comment.lineNumber}</span>
+          <span class="ic-author">${escHtml(comment.displayName)}</span>
+          <span class="ic-time">${formatTime(comment.createdAt)}</span>
+          <div class="ic-thread-actions">
+            ${canResolve && !comment.resolved
+              ? `<button class="ic-resolve-btn" data-comment-id="${escHtml(comment.id)}" title="Mark resolved">✔ Resolve</button>`
+              : ''}
+            <button class="ic-collapse-btn" title="Collapse">▲</button>
+          </div>
+        </div>
+        <div class="ic-body">
+          <div class="ic-root-text">${escHtml(comment.text)}</div>
+          <div class="ic-replies" id="ic-replies-${escHtml(comment.id)}">${repliesHTML}</div>
+          ${!comment.resolved ? `
+            <div class="ic-reply-row">
+              <textarea class="ic-reply-input" placeholder="Reply…" rows="1" maxlength="1000" data-comment-id="${escHtml(comment.id)}"></textarea>
+              <button class="ic-reply-send-btn" data-comment-id="${escHtml(comment.id)}" title="Send reply">➤</button>
+            </div>
+          ` : '<div class="ic-resolved-label">✔ Resolved</div>'}
+        </div>
+      </div>
+    `;
+  }
+
+  // Wire up event handlers inside a rendered comment widget DOM node
+  function wireCommentWidgetEvents(domNode, comment) {
+    // Collapse / expand toggle
+    const collapseBtn = domNode.querySelector('.ic-collapse-btn');
+    const body = domNode.querySelector('.ic-body');
+    if (collapseBtn && body) {
+      collapseBtn.addEventListener('click', () => {
+        const collapsed = body.style.display === 'none';
+        body.style.display = collapsed ? '' : 'none';
+        collapseBtn.textContent = collapsed ? '▲' : '▼';
+      });
+    }
+
+    // Resolve button
+    const resolveBtn = domNode.querySelector('.ic-resolve-btn');
+    if (resolveBtn) {
+      resolveBtn.addEventListener('click', () => {
+        sendWs({ type: 'inline-comment-resolve', commentId: comment.id });
+      });
+    }
+
+    // Reply send button
+    const replyBtn = domNode.querySelector('.ic-reply-send-btn');
+    if (replyBtn) {
+      replyBtn.addEventListener('click', () => {
+        const input = domNode.querySelector(`.ic-reply-input[data-comment-id="${comment.id}"]`);
+        if (!input) return;
+        const text = input.value.trim();
+        if (!text) return;
+        sendWs({ type: 'inline-comment-reply', commentId: comment.id, text });
+        input.value = '';
+      });
+    }
+
+    // Enter in reply textarea sends (Shift+Enter = newline)
+    const replyInput = domNode.querySelector('.ic-reply-input');
+    if (replyInput) {
+      replyInput.addEventListener('keydown', e => {
+        if (e.key === 'Enter' && !e.shiftKey) {
+          e.preventDefault();
+          domNode.querySelector('.ic-reply-send-btn')?.click();
+        }
+      });
+    }
+  }
+
+  // Add a new inline comment as a Monaco ViewZone below the target line
+  function addInlineCommentWidget(comment) {
+    if (!window.monacoEditor) return;
+    if (inlineCommentWidgets.has(comment.id)) return; // already rendered
+
+    const editor = window.monacoEditor;
+
+    const domNode = document.createElement('div');
+    domNode.className = 'ic-widget';
+    domNode.innerHTML = buildCommentThreadHTML(comment);
+    wireCommentWidgetEvents(domNode, comment);
+
+    // Add a gutter decoration (colored marker on the line number margin)
+    const decorations = editor.deltaDecorations([], [{
+      range: new monaco.Range(comment.lineNumber, 1, comment.lineNumber, 1),
+      options: {
+        isWholeLine: false,
+        glyphMarginClassName: 'ic-gutter-icon',
+        glyphMarginHoverMessage: { value: `💬 Comment by ${comment.displayName}` },
+      },
+    }]);
+
+    // Insert as a ViewZone so the widget pushes code down (doesn't overlap)
+    let viewZoneId = null;
+    editor.changeViewZones(accessor => {
+      viewZoneId = accessor.addZone({
+        afterLineNumber: comment.lineNumber,
+        heightInLines: Math.max(3, 2 + (comment.replies || []).length),
+        domNode,
+        suppressMouseDown: false,
+      });
+    });
+
+    inlineCommentWidgets.set(comment.id, { domNode, viewZoneId, decorationIds: decorations, data: comment });
+  }
+
+  // Append a reply to an existing inline comment widget
+  function appendCommentReply(commentId, reply) {
+    const widget = inlineCommentWidgets.get(commentId);
+    if (!widget) return;
+
+    const repliesEl = widget.domNode.querySelector(`#ic-replies-${commentId}`);
+    if (!repliesEl) return;
+
+    const replyEl = document.createElement('div');
+    replyEl.className = 'ic-reply';
+    replyEl.innerHTML = `
+      <span class="ic-reply-author">${escHtml(reply.displayName)}</span>
+      <span class="ic-reply-text">${escHtml(reply.text)}</span>
+      <span class="ic-reply-time">${formatTime(reply.sentAt)}</span>
+    `;
+    repliesEl.appendChild(replyEl);
+
+    // Grow the view zone by one line for the new reply
+    widget.data.replies = widget.data.replies || [];
+    widget.data.replies.push(reply);
+    if (window.monacoEditor) {
+      window.monacoEditor.changeViewZones(accessor => {
+        accessor.layoutZone(widget.viewZoneId);
+      });
+    }
+  }
+
+  // Mark a comment thread as resolved — grey it out in the widget
+  function resolveInlineCommentWidget(commentId, resolvedBy) {
+    const widget = inlineCommentWidgets.get(commentId);
+    if (!widget) return;
+
+    widget.data.resolved = true;
+    const thread = widget.domNode.querySelector('.ic-thread');
+    if (thread) thread.classList.add('ic-resolved');
+
+    // Replace reply row with resolved label
+    const replyRow = widget.domNode.querySelector('.ic-reply-row');
+    if (replyRow) replyRow.outerHTML = `<div class="ic-resolved-label">✔ Resolved by ${escHtml(resolvedBy)}</div>`;
+
+    // Remove resolve button
+    widget.domNode.querySelector('.ic-resolve-btn')?.remove();
+  }
+
+  // Clear all inline comment widgets from the editor (called on session end)
+  function clearAllInlineComments() {
+    if (!window.monacoEditor) return;
+    window.monacoEditor.changeViewZones(accessor => {
+      inlineCommentWidgets.forEach(({ viewZoneId, decorationIds }) => {
+        accessor.removeZone(viewZoneId);
+        if (decorationIds) window.monacoEditor.deltaDecorations(decorationIds, []);
+      });
+    });
+    inlineCommentWidgets.clear();
+  }
+
+  // Add a new inline comment from THIS user triggered by clicking the gutter icon
+  // or pressing a keyboard shortcut (Ctrl+Alt+M)
+  function promptNewInlineComment(lineNumber) {
+    if (!collabState.isActive) {
+      showStatus('Start a collaboration session first', true);
+      return;
+    }
+
+    // Show a small inline prompt widget at that line
+    const editor = window.monacoEditor;
+    if (!editor) return;
+
+    // Prevent duplicate prompt at same line
+    const existingPromptId = `prompt-${lineNumber}`;
+    if (inlineCommentWidgets.has(existingPromptId)) return;
+
+    const promptDom = document.createElement('div');
+    promptDom.className = 'ic-widget ic-prompt';
+    promptDom.innerHTML = `
+      <div class="ic-prompt-inner">
+        <span class="ic-line-label">Line ${lineNumber}</span>
+        <textarea class="ic-prompt-input" rows="2" placeholder="Add a comment on line ${lineNumber}…" maxlength="1000" autofocus></textarea>
+        <div class="ic-prompt-btns">
+          <button class="ic-prompt-submit" title="Post comment">Post</button>
+          <button class="ic-prompt-cancel" title="Cancel">Cancel</button>
+        </div>
+      </div>
+    `;
+
+    let promptZoneId = null;
+    editor.changeViewZones(accessor => {
+      promptZoneId = accessor.addZone({
+        afterLineNumber: lineNumber,
+        heightInLines: 4,
+        domNode: promptDom,
+        suppressMouseDown: false,
+      });
+    });
+
+    inlineCommentWidgets.set(existingPromptId, { domNode: promptDom, viewZoneId: promptZoneId, data: { lineNumber } });
+
+    // Focus the textarea after the zone renders
+    setTimeout(() => promptDom.querySelector('.ic-prompt-input')?.focus(), 50);
+
+    promptDom.querySelector('.ic-prompt-submit').addEventListener('click', () => {
+      const text = promptDom.querySelector('.ic-prompt-input').value.trim();
+      if (!text) return;
+      sendWs({ type: 'inline-comment', lineNumber, text });
+      // Remove the prompt zone
+      editor.changeViewZones(accessor => accessor.removeZone(promptZoneId));
+      inlineCommentWidgets.delete(existingPromptId);
+    });
+
+    promptDom.querySelector('.ic-prompt-cancel').addEventListener('click', () => {
+      editor.changeViewZones(accessor => accessor.removeZone(promptZoneId));
+      inlineCommentWidgets.delete(existingPromptId);
+    });
+
+    promptDom.querySelector('.ic-prompt-input').addEventListener('keydown', e => {
+      if (e.key === 'Enter' && !e.shiftKey) {
+        e.preventDefault();
+        promptDom.querySelector('.ic-prompt-submit').click();
+      }
+      if (e.key === 'Escape') {
+        promptDom.querySelector('.ic-prompt-cancel').click();
+      }
+    });
+  }
+
+  // Wire the gutter click: clicking the glyph margin on any line opens the comment prompt
+  function setupInlineCommentGutterClick() {
+    if (!window.monacoEditor) return;
+    window.monacoEditor.onMouseDown(e => {
+      // GUTTER_GLYPH_MARGIN = 2
+      if (e.target.type !== 2) return;
+      if (!collabState.isActive) return;
+      const lineNumber = e.target.position?.lineNumber;
+      if (lineNumber) promptNewInlineComment(lineNumber);
+    });
+
+    // Also support Ctrl+Alt+M shortcut to add comment on current cursor line
+    window.monacoEditor.addCommand(
+      monaco.KeyMod.CtrlCmd | monaco.KeyMod.Alt | monaco.KeyCode.KeyM,
+      () => {
+        if (!collabState.isActive) return;
+        const line = window.monacoEditor.getPosition()?.lineNumber;
+        if (line) promptNewInlineComment(line);
+      }
+    );
+  }
+
   injectPermissionPanel();
   injectJoinRequestToast();
+  injectChatBox();
+  injectInlineCommentStyles();
 
   // Inject panel styles
   injectCollabStyles();
@@ -157,7 +589,12 @@ function initApp() {
         grantBtn.textContent = user.role === 'Editor' ? '✏️ Revoke Edit' : '✏️ Grant Edit';
         grantBtn.addEventListener('click', () => {
           const newPerm = user.role === 'Editor' ? 'view' : 'edit';
-          sendWs({ type: 'set-permission', targetUserId: user.userId, permission: newPerm });
+          sendWs({
+            type: 'set-permission',
+            roomId: collabState.roomId,
+            targetUserId: user.userId,
+            permission: newPerm,
+          });
         });
 
         const removeBtn = document.createElement('button');
@@ -167,7 +604,11 @@ function initApp() {
         removeBtn.textContent = '🚫 Remove';
         removeBtn.addEventListener('click', () => {
           if (confirm(`Remove "${user.displayName}" from the room?`)) {
-            sendWs({ type: 'remove-participant', targetUserId: user.userId });
+            sendWs({
+              type: 'remove-participant',
+              roomId: collabState.roomId,
+              targetUserId: user.userId,
+            });
           }
         });
 
@@ -479,6 +920,38 @@ function initApp() {
         showStatus(`Error: ${message.message}`, true);
         break;
 
+      // ── Chat ──────────────────────────────────────────────────────────────
+      case 'chat-message':
+        // A single new message broadcast to everyone in the room
+        appendChatMessage(message.message, false);
+        break;
+
+      case 'chat-history':
+        // Full history delivered to a newly joined participant
+        (message.messages || []).forEach(m => appendChatMessage(m, true));
+        break;
+
+      // ── Inline Comments ───────────────────────────────────────────────────
+      case 'inline-comment-new':
+        // A new comment was added anchored to a line number
+        addInlineCommentWidget(message.comment);
+        break;
+
+      case 'inline-comment-reply':
+        // A reply was added to an existing comment thread
+        appendCommentReply(message.commentId, message.reply);
+        break;
+
+      case 'inline-comment-resolved':
+        // A thread was resolved — collapse/grey it in the editor
+        resolveInlineCommentWidget(message.commentId, message.resolvedBy);
+        break;
+
+      case 'inline-comments-dump':
+        // Full set of open comments sent to a newly joined participant
+        (message.comments || []).forEach(c => addInlineCommentWidget(c));
+        break;
+
       default:
         console.warn('[Collab] Unknown message type:', type);
     }
@@ -538,6 +1011,8 @@ function initApp() {
     notifyCollabStateChange();
     connectWebSocket();
     setupMonacoCollaboration();
+    setupInlineCommentGutterClick();
+    setChatVisible(true);
     showStatus(`Collaboration started! Room ID: ${roomId}`, false);
   }
 
@@ -554,6 +1029,8 @@ function initApp() {
     notifyCollabStateChange();
     connectWebSocket();
     setupMonacoCollaboration();
+    setupInlineCommentGutterClick();
+    setChatVisible(true);
     showStatus(`Joining room ${roomId}…`);
   }
 
@@ -572,6 +1049,8 @@ function initApp() {
     notifyCollabStateChange();
     renderParticipants([]);
     toggleParticipantPanel(false);
+    setChatVisible(false);
+    clearAllInlineComments();
 
     // Clear intruder log and join toasts
     const entriesEl = document.getElementById('collab-intruder-log-entries');
@@ -695,8 +1174,12 @@ function initApp() {
 
   if (window.monacoEditor) {
     setupMonacoCollaboration();
+    setupInlineCommentGutterClick();
   } else {
-    window.addEventListener('monaco-ready', setupMonacoCollaboration);
+    window.addEventListener('monaco-ready', () => {
+      setupMonacoCollaboration();
+      setupInlineCommentGutterClick();
+    });
   }
 
   // ─── File Tree & Editor Plumbing (unchanged from original) ─────────────────
@@ -1208,6 +1691,374 @@ function injectCollabStyles() {
       display: block;
       color: #6c7086;
       font-size: 10px;
+    }
+
+    /* ════════════════════════════════════════════════
+       Chat Box
+    ════════════════════════════════════════════════ */
+    .collab-chat {
+      position: fixed;
+      bottom: 28px; /* sit just above the status bar */
+      right: 16px;
+      width: 300px;
+      max-height: 420px;
+      background: #1e1e2e;
+      border: 1px solid #3a3a5c;
+      border-radius: 10px;
+      box-shadow: 0 6px 28px rgba(0,0,0,0.55);
+      display: flex;
+      flex-direction: column;
+      z-index: 1100;
+      font-family: 'Segoe UI', sans-serif;
+      font-size: 13px;
+      color: #cdd6f4;
+      transition: transform 0.2s ease, opacity 0.2s ease;
+      overflow: hidden;
+    }
+    .collab-chat-hidden {
+      transform: translateY(20px);
+      opacity: 0;
+      pointer-events: none;
+    }
+    .chat-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 9px 12px;
+      background: #181825;
+      border-bottom: 1px solid #313244;
+      cursor: default;
+      flex-shrink: 0;
+      user-select: none;
+    }
+    .chat-title {
+      font-weight: 700;
+      font-size: 12px;
+      color: #89b4fa;
+      letter-spacing: 0.04em;
+    }
+    .chat-header-actions {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+    .chat-unread-badge {
+      background: #f38ba8;
+      color: #1e1e2e;
+      font-size: 10px;
+      font-weight: 700;
+      border-radius: 999px;
+      padding: 1px 6px;
+      min-width: 18px;
+      text-align: center;
+    }
+    .chat-toggle-btn, .chat-close-btn {
+      background: none;
+      border: none;
+      color: #6c7086;
+      cursor: pointer;
+      font-size: 13px;
+      padding: 2px 5px;
+      border-radius: 4px;
+      line-height: 1;
+    }
+    .chat-toggle-btn:hover, .chat-close-btn:hover {
+      background: #313244;
+      color: #cdd6f4;
+    }
+    .chat-body {
+      display: flex;
+      flex-direction: column;
+      flex: 1;
+      min-height: 0;
+    }
+    .chat-messages {
+      flex: 1;
+      overflow-y: auto;
+      padding: 10px 10px 4px;
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+      min-height: 100px;
+      max-height: 290px;
+    }
+    .chat-bubble {
+      max-width: 88%;
+      display: flex;
+      flex-direction: column;
+      gap: 2px;
+    }
+    .chat-bubble-me {
+      align-self: flex-end;
+      align-items: flex-end;
+    }
+    .chat-bubble-them {
+      align-self: flex-start;
+      align-items: flex-start;
+    }
+    .chat-sender {
+      font-size: 10px;
+      color: #89b4fa;
+      font-weight: 600;
+      margin-bottom: 1px;
+    }
+    .chat-text {
+      background: #313244;
+      border-radius: 10px;
+      padding: 6px 10px;
+      line-height: 1.45;
+      word-break: break-word;
+      white-space: pre-wrap;
+      font-size: 12.5px;
+    }
+    .chat-bubble-me .chat-text {
+      background: #4c7899;
+      color: #e0f0ff;
+      border-bottom-right-radius: 3px;
+    }
+    .chat-bubble-them .chat-text {
+      border-bottom-left-radius: 3px;
+    }
+    .chat-time {
+      font-size: 10px;
+      color: #45475a;
+      margin-top: 1px;
+    }
+    .chat-input-row {
+      display: flex;
+      align-items: flex-end;
+      gap: 6px;
+      padding: 8px 10px;
+      border-top: 1px solid #313244;
+      flex-shrink: 0;
+    }
+    .chat-input {
+      flex: 1;
+      background: #313244;
+      border: 1px solid #45475a;
+      border-radius: 8px;
+      color: #cdd6f4;
+      font-family: inherit;
+      font-size: 12px;
+      padding: 6px 10px;
+      resize: none;
+      outline: none;
+      line-height: 1.4;
+      max-height: 100px;
+      overflow-y: auto;
+    }
+    .chat-input:focus { border-color: #89b4fa; }
+    .chat-send-btn {
+      background: #89b4fa;
+      color: #1e1e2e;
+      border: none;
+      border-radius: 8px;
+      width: 32px;
+      height: 32px;
+      cursor: pointer;
+      font-size: 13px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      flex-shrink: 0;
+      transition: opacity 0.15s;
+    }
+    .chat-send-btn:hover { opacity: 0.85; }
+
+    /* ════════════════════════════════════════════════
+       Inline Comment Widgets
+    ════════════════════════════════════════════════ */
+    .ic-widget {
+      font-family: 'Segoe UI', sans-serif;
+      font-size: 12px;
+      color: #cdd6f4;
+      background: transparent;
+      padding: 2px 8px;
+      box-sizing: border-box;
+      width: 100%;
+    }
+    .ic-thread {
+      background: #1e1e2e;
+      border: 1px solid #89b4fa;
+      border-radius: 8px;
+      overflow: hidden;
+      box-shadow: 0 2px 12px rgba(0,0,0,0.4);
+      margin: 2px 0 4px;
+      transition: border-color 0.2s;
+    }
+    .ic-thread.ic-resolved {
+      border-color: #45475a;
+      opacity: 0.7;
+    }
+    .ic-thread-header {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 6px 10px;
+      background: #181825;
+      border-bottom: 1px solid #313244;
+      flex-wrap: wrap;
+    }
+    .ic-line-label {
+      font-size: 10px;
+      background: #313244;
+      border-radius: 3px;
+      padding: 1px 6px;
+      color: #89b4fa;
+      font-weight: 700;
+      flex-shrink: 0;
+    }
+    .ic-author {
+      font-weight: 600;
+      font-size: 11px;
+      color: #cba6f7;
+      flex: 1;
+    }
+    .ic-time {
+      font-size: 10px;
+      color: #45475a;
+    }
+    .ic-thread-actions {
+      display: flex;
+      gap: 4px;
+      align-items: center;
+      margin-left: auto;
+    }
+    .ic-resolve-btn, .ic-collapse-btn {
+      background: none;
+      border: none;
+      cursor: pointer;
+      font-size: 11px;
+      color: #6c7086;
+      padding: 1px 5px;
+      border-radius: 3px;
+    }
+    .ic-resolve-btn:hover { color: #a6e3a1; background: #1e2b1e; }
+    .ic-collapse-btn:hover { color: #cdd6f4; background: #313244; }
+    .ic-body {
+      padding: 8px 10px;
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+    }
+    .ic-root-text {
+      color: #cdd6f4;
+      line-height: 1.5;
+      white-space: pre-wrap;
+      word-break: break-word;
+    }
+    .ic-replies {
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+      padding-left: 8px;
+      border-left: 2px solid #313244;
+    }
+    .ic-reply {
+      display: flex;
+      flex-direction: column;
+      gap: 1px;
+    }
+    .ic-reply-author {
+      font-size: 10px;
+      font-weight: 700;
+      color: #89b4fa;
+    }
+    .ic-reply-text {
+      font-size: 12px;
+      color: #cdd6f4;
+      white-space: pre-wrap;
+      word-break: break-word;
+    }
+    .ic-reply-time {
+      font-size: 10px;
+      color: #45475a;
+    }
+    .ic-reply-row {
+      display: flex;
+      gap: 6px;
+      align-items: flex-end;
+    }
+    .ic-reply-input {
+      flex: 1;
+      background: #313244;
+      border: 1px solid #45475a;
+      border-radius: 6px;
+      color: #cdd6f4;
+      font-family: inherit;
+      font-size: 11px;
+      padding: 4px 8px;
+      resize: none;
+      outline: none;
+    }
+    .ic-reply-input:focus { border-color: #89b4fa; }
+    .ic-reply-send-btn {
+      background: #89b4fa;
+      color: #1e1e2e;
+      border: none;
+      border-radius: 6px;
+      width: 26px;
+      height: 26px;
+      font-size: 11px;
+      cursor: pointer;
+      flex-shrink: 0;
+    }
+    .ic-resolved-label {
+      font-size: 11px;
+      color: #a6e3a1;
+      font-weight: 600;
+    }
+    /* Inline comment prompt widget */
+    .ic-prompt { padding: 4px 8px; }
+    .ic-prompt-inner {
+      background: #1e1e2e;
+      border: 1px dashed #cba6f7;
+      border-radius: 8px;
+      padding: 8px 10px;
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+    }
+    .ic-prompt-input {
+      background: #313244;
+      border: 1px solid #45475a;
+      border-radius: 6px;
+      color: #cdd6f4;
+      font-family: inherit;
+      font-size: 12px;
+      padding: 5px 8px;
+      resize: none;
+      outline: none;
+      width: 100%;
+      box-sizing: border-box;
+    }
+    .ic-prompt-input:focus { border-color: #cba6f7; }
+    .ic-prompt-btns { display: flex; gap: 6px; }
+    .ic-prompt-submit {
+      background: #cba6f7;
+      color: #1e1e2e;
+      border: none;
+      border-radius: 5px;
+      padding: 4px 12px;
+      font-size: 11px;
+      font-weight: 700;
+      cursor: pointer;
+    }
+    .ic-prompt-cancel {
+      background: #45475a;
+      color: #cdd6f4;
+      border: none;
+      border-radius: 5px;
+      padding: 4px 10px;
+      font-size: 11px;
+      cursor: pointer;
+    }
+    /* Gutter icon shown in the Monaco line number margin */
+    .ic-gutter-icon {
+      background: #cba6f7;
+      width: 6px !important;
+      border-radius: 3px;
+      cursor: pointer;
     }
   `;
   document.head.appendChild(style);
