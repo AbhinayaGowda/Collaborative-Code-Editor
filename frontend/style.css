@@ -1,0 +1,692 @@
+* {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+body {
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+  height: 100vh;
+  overflow: hidden;
+  color: #cccccc;
+  background-color: #1e1e1e;
+}
+
+/* ---- Layout ---- */
+.editor-layout {
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+}
+
+/* ---- Title bar (VS Code style) ---- */
+.title-bar {
+  flex-shrink: 0;
+  height: 32px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background-color: #323233;
+  border-bottom: 1px solid #2d2d2d;
+  -webkit-app-region: drag;
+}
+
+.title-bar-text {
+  font-size: 12px;
+  color: #cccccc;
+  pointer-events: none;
+}
+
+/* ---- Main content: activity bar + sidebar + editor ---- */
+.main-content {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.activity-bar,
+.sidebar {
+  flex-shrink: 0;
+}
+
+.editor-panel {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+}
+
+.editor-area {
+  flex: 1;
+  min-height: 0;
+}
+
+/* ---- Activity bar (left icons) ---- */
+.activity-bar {
+  width: 48px;
+  background-color: #333333;
+  border-right: 1px solid #2d2d2d;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding-top: 8px;
+  gap: 2px;
+}
+
+.activity-btn {
+  width: 48px;
+  height: 48px;
+  border: none;
+  background: transparent;
+  color: #858585;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  -webkit-app-region: no-drag;
+}
+
+.activity-btn:hover {
+  color: #cccccc;
+}
+
+.activity-btn.active {
+  color: #ffffff;
+  border-left: 3px solid #007acc;
+  margin-left: -3px;
+  padding-left: 3px;
+}
+
+.activity-btn svg {
+  width: 24px;
+  height: 24px;
+}
+
+/* ---- Sidebar (file tree) ---- */
+.sidebar {
+  width: 220px;
+  background-color: #252526;
+  border-right: 1px solid #2d2d2d;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.sidebar-header {
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: #858585;
+  padding: 8px 12px;
+  border-bottom: 1px solid #2d2d2d;
+}
+
+.file-list {
+  list-style: none;
+  padding: 4px 0;
+  overflow-y: auto;
+}
+
+.file-item {
+  font-size: 13px;
+  padding: 4px 12px 4px 24px;
+  color: #cccccc;
+  cursor: pointer;
+  border-left: 2px solid transparent;
+}
+
+.file-item:hover {
+  background-color: #2a2d2e;
+}
+
+.file-item.active {
+  background-color: #094771;
+  border-left-color: #007acc;
+  color: #ffffff;
+}
+
+/* ---- Recent projects ---- */
+.recent-projects-list {
+  padding: 4px 0;
+  border-bottom: 1px solid #2d2d2d;
+  max-height: 120px;
+  overflow-y: auto;
+}
+
+.recent-projects-empty {
+  font-size: 12px;
+  color: #858585;
+  padding: 8px 12px;
+  margin: 0;
+}
+
+.recent-project-item {
+  font-size: 13px;
+  padding: 4px 12px 4px 24px;
+  color: #cccccc;
+  cursor: pointer;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.recent-project-item:hover {
+  background-color: #2a2d2e;
+}
+
+/* ---- Folder tree ---- */
+.folder-tree-container {
+  flex: 1;
+  overflow: auto;
+  padding: 4px 0;
+}
+
+.folder-tree-empty {
+  font-size: 13px;
+  color: #858585;
+  padding: 12px;
+  margin: 0;
+}
+
+.folder-tree {
+  list-style: none;
+}
+
+.tree-folder-label {
+  font-size: 13px;
+  color: #858585;
+  padding: 2px 0;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+}
+
+.tree-folder-icon {
+  display: inline-block;
+  width: 14px;
+  margin-right: 2px;
+  flex-shrink: 0;
+  font-size: 10px;
+  color: #858585;
+}
+
+.tree-folder-name {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.tree-children {
+  border-left: 1px solid transparent;
+}
+
+.tree-file {
+  font-size: 13px;
+  color: #cccccc;
+  padding: 4px 12px 4px 24px;
+  cursor: pointer;
+  border-left: 2px solid transparent;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.tree-file:hover {
+  background-color: #2a2d2e;
+}
+
+.tree-file.active {
+  background-color: #094771;
+  border-left-color: #007acc;
+  color: #ffffff;
+}
+
+/* ---- Tab bar ---- */
+.tab-bar {
+  display: flex;
+  align-items: flex-end;
+  background-color: #252526;
+  border-bottom: 1px solid #2d2d2d;
+  min-height: 35px;
+  padding: 0 4px 0 0;
+  gap: 8px;
+}
+
+.tab-bar-spacer {
+  flex: 1;
+}
+
+.open-file-btn,
+.open-folder-btn {
+  font-size: 13px;
+  padding: 6px 10px;
+  margin-bottom: 4px;
+  background-color: #0e639c;
+  color: #ffffff;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+}
+
+.open-file-btn:hover,
+.open-folder-btn:hover {
+  background-color: #1177bb;
+}
+
+.new-file-btn,
+.save-btn,
+.save-as-btn {
+  font-size: 13px;
+  padding: 6px 10px;
+  margin-bottom: 4px;
+  background-color: #2d2d2d;
+  color: #cccccc;
+  border: 1px solid #3c3c3c;
+  border-radius: 4px;
+  cursor: pointer;
+}
+
+.new-file-btn:hover,
+.save-btn:hover,
+.save-as-btn:hover {
+  background-color: #3c3c3c;
+  color: #ffffff;
+}
+
+.run-btn {
+  font-size: 13px;
+  padding: 6px 10px;
+  margin-bottom: 4px;
+  background-color: #0e7c39;
+  color: #ffffff;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+}
+
+.run-btn:hover {
+  background-color: #0f9d3a;
+}
+
+.tab {
+  font-size: 13px;
+  padding: 8px 12px;
+  margin-right: 2px;
+  background-color: #252526;
+  color: #969696;
+  cursor: pointer;
+  border: 1px solid transparent;
+  border-bottom: none;
+  border-radius: 4px 4px 0 0;
+}
+
+.tab:hover {
+  color: #cccccc;
+}
+
+.tab.active {
+  background-color: #1e1e1e;
+  color: #ffffff;
+  border-color: #2d2d2d;
+  border-bottom: 1px solid #1e1e1e;
+  margin-bottom: -1px;
+}
+
+/* ---- Collaboration toolbar ---- */
+.collab-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-left: auto;
+}
+
+.collab-btn {
+  font-size: 12px;
+  padding: 4px 10px;
+  border-radius: 4px;
+  border: 1px solid #3c3c3c;
+  background-color: #2d2d2d;
+  color: #cccccc;
+  cursor: pointer;
+  white-space: nowrap;
+  -webkit-app-region: no-drag;
+}
+
+.collab-btn:hover {
+  background-color: #3c3c3c;
+  color: #ffffff;
+}
+
+.collab-btn-primary {
+  background-color: #0e639c;
+  border-color: #0e639c;
+  color: #ffffff;
+}
+
+.collab-btn-primary:hover {
+  background-color: #1177bb;
+  border-color: #1177bb;
+}
+
+/* ---- Editor area ---- */
+.editor-area {
+  background-color: #1e1e1e;
+  padding: 0;
+}
+
+.monaco-container {
+  width: 100%;
+  height: 100%;
+  min-height: 200px;
+}
+
+.code-editor {
+  width: 100%;
+  height: 100%;
+  display: block;
+  font-family: "Cascadia Code", "Consolas", "Monaco", "Courier New", monospace;
+  font-size: 14px;
+  line-height: 1.5;
+  color: #d4d4d4;
+  background: transparent;
+  border: none;
+  resize: none;
+  padding: 0 16px;
+  outline: none;
+  caret-color: #ffffff;
+}
+
+.code-editor::placeholder {
+  color: #6a6a6a;
+}
+
+/* ---- Terminal panel ---- */
+.terminal-panel {
+  flex-shrink: 0;
+  height: 200px;
+  display: flex;
+  flex-direction: column;
+  background-color: #1e1e1e;
+  border-top: 1px solid #2d2d2d;
+}
+
+.terminal-output {
+  flex: 1;
+  overflow-y: auto;
+  padding: 8px 12px;
+  font-family: "Cascadia Code", "Consolas", "Monaco", "Courier New", monospace;
+  font-size: 13px;
+  line-height: 1.4;
+  color: #cccccc;
+  background-color: #1e1e1e;
+  white-space: pre-wrap;
+  word-break: break-all;
+}
+
+.terminal-output .terminal-stderr {
+  color: #f48771;
+}
+
+.terminal-input-row {
+  display: flex;
+  align-items: center;
+  padding: 4px 12px;
+  background-color: #252526;
+  border-top: 1px solid #2d2d2d;
+}
+
+.terminal-prompt {
+  font-family: "Cascadia Code", "Consolas", "Monaco", "Courier New", monospace;
+  font-size: 13px;
+  color: #858585;
+  margin-right: 8px;
+}
+
+.terminal-input {
+  flex: 1;
+  font-family: "Cascadia Code", "Consolas", "Monaco", "Courier New", monospace;
+  font-size: 13px;
+  color: #cccccc;
+  background: transparent;
+  border: none;
+  outline: none;
+  padding: 4px 0;
+}
+
+.terminal-input::placeholder {
+  color: #6a6a6a;
+}
+
+/* ---- Status bar ---- */
+.status-bar {
+  flex-shrink: 0;
+  height: 22px;
+  background-color: #007acc;
+  color: #ffffff;
+  font-size: 12px;
+  display: flex;
+  align-items: center;
+  padding: 0 8px;
+  gap: 16px;
+  border-top: 1px solid #006bb3;
+}
+
+.status-item {
+  opacity: 0.9;
+}
+
+.status-right {
+  margin-left: auto;
+}
+
+.status-error {
+  color: #f48771;
+}
+
+.status-item#collab-status {
+  color: #4ec9b0;
+  font-weight: 500;
+  cursor: help;
+}
+
+/* ---- Collaboration modal ---- */
+.collab-modal-backdrop {
+  position: fixed;
+  inset: 0;
+  background-color: rgba(0, 0, 0, 0.5);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 40;
+}
+
+.collab-modal-hidden {
+  display: none;
+}
+
+.collab-modal {
+  width: 480px;
+  max-width: calc(100% - 48px);
+  background-color: #252526;
+  border-radius: 6px;
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.6);
+  border: 1px solid #3c3c3c;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.collab-modal-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  padding: 12px 16px 8px;
+  background-color: #2d2d2d;
+  border-bottom: 1px solid #3c3c3c;
+}
+
+.collab-modal-title-group {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.collab-modal-title {
+  font-size: 14px;
+  font-weight: 500;
+  color: #ffffff;
+}
+
+.collab-modal-subtitle {
+  font-size: 12px;
+  color: #a0a0a0;
+}
+
+.collab-modal-close {
+  border: none;
+  background: transparent;
+  color: #a0a0a0;
+  font-size: 16px;
+  line-height: 1;
+  cursor: pointer;
+  padding: 2px 4px;
+}
+
+.collab-modal-close:hover {
+  color: #ffffff;
+  background-color: #3c3c3c;
+  border-radius: 3px;
+}
+
+.collab-modal-body {
+  padding: 12px 16px 14px;
+  background-color: #252526;
+}
+
+.collab-mode-tabs {
+  display: inline-flex;
+  padding: 2px;
+  border-radius: 4px;
+  background-color: #1e1e1e;
+  border: 1px solid #3c3c3c;
+  margin-bottom: 12px;
+}
+
+.collab-mode-tab {
+  font-size: 12px;
+  padding: 4px 10px;
+  border-radius: 3px;
+  border: none;
+  background: transparent;
+  color: #a0a0a0;
+  cursor: pointer;
+}
+
+.collab-mode-tab:hover {
+  background-color: #2d2d2d;
+  color: #ffffff;
+}
+
+.collab-mode-tab-active {
+  background-color: #0e639c;
+  color: #ffffff;
+}
+
+.collab-form {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.collab-form-section {
+  display: none;
+  flex-direction: column;
+  gap: 10px;
+}
+
+/* By default, show the "Start" section and primary Start button.
+   App logic can toggle visibility by adding/removing these classes. */
+.collab-form-section-start {
+  display: flex;
+}
+
+.collab-field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.collab-label {
+  font-size: 12px;
+  color: #cccccc;
+}
+
+.collab-input {
+  font-size: 13px;
+  padding: 6px 8px;
+  border-radius: 3px;
+  border: 1px solid #3c3c3c;
+  background-color: #1e1e1e;
+  color: #e0e0e0;
+  outline: none;
+}
+
+.collab-input::placeholder {
+  color: #6a6a6a;
+}
+
+.collab-input:focus {
+  border-color: #007acc;
+  box-shadow: 0 0 0 1px rgba(0, 122, 204, 0.4);
+}
+
+.collab-hint {
+  font-size: 11px;
+  color: #858585;
+}
+
+.collab-modal-footer {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 4px;
+}
+
+.collab-primary-action,
+.collab-secondary-action {
+  font-size: 12px;
+  padding: 6px 12px;
+  border-radius: 4px;
+  cursor: pointer;
+  border: 1px solid transparent;
+}
+
+.collab-primary-action {
+  background-color: #0e639c;
+  border-color: #0e639c;
+  color: #ffffff;
+}
+
+.collab-primary-action:hover {
+  background-color: #1177bb;
+  border-color: #1177bb;
+}
+
+.collab-primary-action-join {
+  display: none;
+}
+
+.collab-secondary-action {
+  background-color: #2d2d2d;
+  border-color: #3c3c3c;
+  color: #cccccc;
+}
+
+.collab-secondary-action:hover {
+  background-color: #3c3c3c;
+  color: #ffffff;
+}

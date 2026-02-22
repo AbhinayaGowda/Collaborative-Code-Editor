@@ -1,0 +1,195 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Collaborative Code Editor</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body class="editor-layout">
+  <!-- Top title bar -->
+  <header class="title-bar">
+    <span class="title-bar-text">Collaborative Code Editor</span>
+  </header>
+
+  <div class="main-content">
+  <!-- Left activity bar -->
+  <aside class="activity-bar">
+    <button class="activity-btn active" title="Explorer">
+      <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+        <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/>
+      </svg>
+    </button>
+    <button class="activity-btn" title="Search">
+      <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+        <circle cx="11" cy="11" r="8"/>
+        <path d="m21 21-4.35-4.35"/>
+      </svg>
+    </button>
+    <button class="activity-btn" title="Git">
+      <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+        <path d="M6 3v12"/>
+        <path d="M18 9a3 3 0 0 0-6 0c0 2 3 3 3 6a3 3 0 0 0 6 0c0-3-3-4-3-6Z"/>
+        <path d="M6 9a3 3 0 0 0 6 0c0-2-3-3-3-6a3 3 0 0 0-6 0c0 3 3 4 3 6Z"/>
+      </svg>
+    </button>
+  </aside>
+
+  <!-- Left sidebar: file tree -->
+  <aside class="sidebar">
+    <div class="sidebar-header">RECENT PROJECTS</div>
+    <div id="recent-projects-list" class="recent-projects-list"></div>
+    <div class="sidebar-header">EXPLORER</div>
+    <div id="folder-tree-container" class="folder-tree-container">
+      <p class="folder-tree-empty" id="folder-tree-empty">Open a folder</p>
+      <div id="folder-tree" class="folder-tree" hidden></div>
+    </div>
+  </aside>
+
+  <!-- Main area: tabs + editor -->
+  <section class="editor-panel">
+    <div class="tab-bar">
+      <button type="button" class="open-file-btn" title="Open File">Open File</button>
+      <button type="button" class="open-folder-btn" title="Open Folder">Open Folder</button>
+      <button type="button" class="new-file-btn" title="New File">New File</button>
+      <button type="button" class="save-btn" title="Save">Save</button>
+      <button type="button" class="save-as-btn" title="Save As">Save As</button>
+      <button type="button" class="run-btn" title="Run Current File">Run</button>
+      <div class="tab active" id="current-tab" data-file-path="">main.js</div>
+      <div class="tab-bar-spacer" aria-hidden="true"></div>
+      <div class="collab-toolbar" aria-label="Collaboration">
+        <button type="button" class="collab-btn collab-btn-primary">Start Collaboration</button>
+        <button type="button" class="collab-btn">Join Room</button>
+      </div>
+    </div>
+    <div class="editor-area">
+      <div id="monaco-container" class="monaco-container"></div>
+    </div>
+  </section>
+  </div>
+
+  <!-- Bottom terminal panel -->
+  <section class="terminal-panel">
+    <div class="terminal-output" id="terminal-output"></div>
+    <div class="terminal-input-row">
+      <span class="terminal-prompt">&gt;</span>
+      <input type="text" class="terminal-input" id="terminal-input" spellcheck="false" autocomplete="off" />
+    </div>
+  </section>
+
+  <!-- Bottom status bar -->
+  <footer class="status-bar">
+    <span class="status-item">Ln 1, Col 1</span>
+    <span class="status-item">UTF-8</span>
+    <span class="status-item">JavaScript</span>
+    <span class="status-item" id="status-message"></span>
+<span class="status-item" id="collab-status" style="display: none;"></span>
+<span class="status-item">👥 Participants: <span id="count">1</span></span>
+    <span class="status-item status-right">Collaborative Code Editor</span>
+  </footer>
+
+  <!-- Collaboration modal (UI only, no logic) -->
+  <div class="collab-modal-backdrop collab-modal-hidden" role="presentation" aria-hidden="true">
+    <div class="collab-modal" role="dialog" aria-modal="true" aria-labelledby="collab-modal-title">
+      <header class="collab-modal-header">
+        <div class="collab-modal-title-group">
+          <h2 class="collab-modal-title" id="collab-modal-title">Collaboration Session</h2>
+          <p class="collab-modal-subtitle">Create a new session or join an existing room.</p>
+        </div>
+        <button type="button" class="collab-modal-close" aria-label="Close collaboration dialog">
+          ×
+        </button>
+      </header>
+
+      <div class="collab-modal-body">
+        <div class="collab-mode-tabs" role="tablist" aria-label="Collaboration mode">
+          <button type="button" class="collab-mode-tab collab-mode-tab-active" role="tab" aria-selected="true" data-mode="start">
+            Start
+          </button>
+          <button type="button" class="collab-mode-tab" role="tab" aria-selected="false" data-mode="join">
+            Join
+          </button>
+        </div>
+
+        <form class="collab-form" novalidate>
+          <div class="collab-form-section collab-form-section-start" data-mode-section="start">
+            <div class="collab-field">
+              <label class="collab-label" for="collab-display-name-start">Display name</label>
+              <input
+                id="collab-display-name-start"
+                class="collab-input"
+                type="text"
+                name="displayNameStart"
+                placeholder="How others will see you"
+                autocomplete="off"
+              />
+            </div>
+
+            <div class="collab-field">
+              <label class="collab-label" for="collab-room-name">Room name (optional)</label>
+              <input
+                id="collab-room-name"
+                class="collab-input"
+                type="text"
+                name="roomName"
+                placeholder="e.g. feature-auth, pairing-session"
+                autocomplete="off"
+              />
+            </div>
+
+            <div class="collab-hint">
+              A shareable room ID will be generated when you start a session.
+            </div>
+          </div>
+
+          <div class="collab-form-section collab-form-section-join" data-mode-section="join">
+            <div class="collab-field">
+              <label class="collab-label" for="collab-display-name-join">Display name</label>
+              <input
+                id="collab-display-name-join"
+                class="collab-input"
+                type="text"
+                name="displayNameJoin"
+                placeholder="How others will see you"
+                autocomplete="off"
+              />
+            </div>
+
+            <div class="collab-field">
+              <label class="collab-label" for="collab-room-id">Room ID</label>
+              <input
+                id="collab-room-id"
+                class="collab-input"
+                type="text"
+                name="roomId"
+                placeholder="Paste an existing room ID"
+                autocomplete="off"
+              />
+            </div>
+
+            <div class="collab-hint">
+              Ask the host for the room ID and paste it here to join their session.
+            </div>
+          </div>
+
+          <footer class="collab-modal-footer">
+            <button type="button" class="collab-primary-action" data-action="start">
+              Start Collaboration
+            </button>
+            <button type="button" class="collab-primary-action collab-primary-action-join" data-action="join">
+              Join Room
+            </button>
+            <button type="button" class="collab-secondary-action">
+              Cancel
+            </button>
+          </footer>
+        </form>
+      </div>
+    </div>
+  </div>
+
+  <script src="/node_modules/monaco-editor/min/vs/loader.js"></script>
+  <script src="monaco-init.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>
