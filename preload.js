@@ -22,4 +22,8 @@ contextBridge.exposeInMainWorld('editorAPI', {
   onTerminalOutput: (callback) => { terminalOutputCallback = callback; },
   killTerminal: () => ipcRenderer.invoke('terminal-kill'),
   runCurrentFile: (filePath) => ipcRenderer.invoke('run-file', filePath),
+  notifyCollabState: (isActive) => ipcRenderer.send('collab-state-changed', isActive),
+  onMenuCommand: (callback) => {
+    ipcRenderer.on('menu-command', (_event, command) => callback(command));
+  }
 });
