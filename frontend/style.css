@@ -19,24 +19,6 @@ body {
   height: 100vh;
 }
 
-/* ---- Title bar (VS Code style) ---- */
-.title-bar {
-  flex-shrink: 0;
-  height: 32px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  background-color: #323233;
-  border-bottom: 1px solid #2d2d2d;
-  -webkit-app-region: drag;
-}
-
-.title-bar-text {
-  font-size: 12px;
-  color: #cccccc;
-  pointer-events: none;
-}
-
 /* ---- Main content: activity bar + sidebar + editor ---- */
 .main-content {
   display: flex;
@@ -259,58 +241,6 @@ body {
   flex: 1;
 }
 
-.open-file-btn,
-.open-folder-btn {
-  font-size: 13px;
-  padding: 6px 10px;
-  margin-bottom: 4px;
-  background-color: #0e639c;
-  color: #ffffff;
-  border: none;
-  border-radius: 4px;
-  cursor: pointer;
-}
-
-.open-file-btn:hover,
-.open-folder-btn:hover {
-  background-color: #1177bb;
-}
-
-.new-file-btn,
-.save-btn,
-.save-as-btn {
-  font-size: 13px;
-  padding: 6px 10px;
-  margin-bottom: 4px;
-  background-color: #2d2d2d;
-  color: #cccccc;
-  border: 1px solid #3c3c3c;
-  border-radius: 4px;
-  cursor: pointer;
-}
-
-.new-file-btn:hover,
-.save-btn:hover,
-.save-as-btn:hover {
-  background-color: #3c3c3c;
-  color: #ffffff;
-}
-
-.run-btn {
-  font-size: 13px;
-  padding: 6px 10px;
-  margin-bottom: 4px;
-  background-color: #0e7c39;
-  color: #ffffff;
-  border: none;
-  border-radius: 4px;
-  cursor: pointer;
-}
-
-.run-btn:hover {
-  background-color: #0f9d3a;
-}
-
 .tab {
   font-size: 13px;
   padding: 8px 12px;
@@ -335,40 +265,24 @@ body {
   margin-bottom: -1px;
 }
 
-/* ---- Collaboration toolbar ---- */
-.collab-toolbar {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  margin-left: auto;
-}
-
-.collab-btn {
+/* ---- Collaboration nav buttons (tab bar) ---- */
+.collab-nav-btn {
   font-size: 12px;
-  padding: 4px 10px;
-  border-radius: 4px;
-  border: 1px solid #3c3c3c;
-  background-color: #2d2d2d;
+  padding: 5px 10px;
+  background: #2d2d2d;
   color: #cccccc;
+  border: 1px solid #3c3c3c;
+  border-radius: 4px;
   cursor: pointer;
   white-space: nowrap;
-  -webkit-app-region: no-drag;
+  align-self: center;
+  transition: background 0.15s, color 0.15s;
 }
 
-.collab-btn:hover {
-  background-color: #3c3c3c;
+.collab-nav-btn:hover {
+  background: #0e639c;
   color: #ffffff;
-}
-
-.collab-btn-primary {
-  background-color: #0e639c;
   border-color: #0e639c;
-  color: #ffffff;
-}
-
-.collab-btn-primary:hover {
-  background-color: #1177bb;
-  border-color: #1177bb;
 }
 
 /* ---- Editor area ---- */

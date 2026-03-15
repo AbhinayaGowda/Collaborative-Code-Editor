@@ -25,13 +25,6 @@ function initApp() {
   console.log('[initApp] running, monacoEditor:', !!editor);
   if (!editor) return;
 
-  const openFileBtn = document.querySelector('.open-file-btn');
-  const openFolderBtn = document.querySelector('.open-folder-btn');
-  const newFileBtn = document.querySelector('.new-file-btn');
-  console.log('[initApp] newFileBtn:', newFileBtn ? 'found' : 'NULL');
-  const saveBtn = document.querySelector('.save-btn');
-  const saveAsBtn = document.querySelector('.save-as-btn');
-  const runBtn = document.querySelector('.run-btn');
   const currentTab = document.getElementById('current-tab');
   const statusMessage = document.getElementById('status-message');
   const folderTreeEmpty = document.getElementById('folder-tree-empty');
@@ -287,8 +280,8 @@ function initApp() {
           <span class="ic-time">${formatTime(comment.createdAt)}</span>
           <div class="ic-thread-actions">
             ${canResolve && !comment.resolved
-              ? `<button class="ic-resolve-btn" data-comment-id="${escHtml(comment.id)}" title="Mark resolved">✔ Resolve</button>`
-              : ''}
+        ? `<button class="ic-resolve-btn" data-comment-id="${escHtml(comment.id)}" title="Mark resolved">✔ Resolve</button>`
+        : ''}
             <button class="ic-collapse-btn" title="Collapse">▲</button>
           </div>
         </div>
@@ -308,14 +301,15 @@ function initApp() {
 
   // Wire up event handlers inside a rendered comment widget DOM node
   function wireCommentWidgetEvents(domNode, comment) {
-    // Collapse / expand toggle
+    // CRITICAL: Stop Monaco from stealing mouse events on the widget
+    ['mousedown', 'mouseup', 'click', 'pointerdown'].forEach(evt => {
+      domNode.addEventListener(evt, e => e.stopPropagation());
+    });
+    // Collapse arrow removes the entire comment widget (ViewZone + decoration)
     const collapseBtn = domNode.querySelector('.ic-collapse-btn');
-    const body = domNode.querySelector('.ic-body');
-    if (collapseBtn && body) {
+    if (collapseBtn) {
       collapseBtn.addEventListener('click', () => {
-        const collapsed = body.style.display === 'none';
-        body.style.display = collapsed ? '' : 'none';
-        collapseBtn.textContent = collapsed ? '▲' : '▼';
+        removeInlineCommentWidget(comment.id);
       });
     }
 
@@ -376,16 +370,30 @@ function initApp() {
 
     // Insert as a ViewZone so the widget pushes code down (doesn't overlap)
     let viewZoneId = null;
+    const replyCount = (comment.replies || []).length;
+    const heightPx = 100 + replyCount * 28; // base + per-reply
     editor.changeViewZones(accessor => {
       viewZoneId = accessor.addZone({
         afterLineNumber: comment.lineNumber,
-        heightInLines: Math.max(3, 2 + (comment.replies || []).length),
+        heightInPx: heightPx,
         domNode,
         suppressMouseDown: false,
       });
     });
 
     inlineCommentWidgets.set(comment.id, { domNode, viewZoneId, decorationIds: decorations, data: comment });
+  }
+
+  // Remove a single inline comment widget (ViewZone + decoration) by its id
+  function removeInlineCommentWidget(id) {
+    const widget = inlineCommentWidgets.get(id);
+    if (!widget) return;
+    const editor = window.monacoEditor;
+    if (!editor) return;
+    editor.changeViewZones(accessor => accessor.removeZone(widget.viewZoneId));
+    if (widget.decorationIds) editor.deltaDecorations(widget.decorationIds, []);
+    if (widget.contentWidget) editor.removeContentWidget(widget.contentWidget);
+    inlineCommentWidgets.delete(id);
   }
 
   // Append a reply to an existing inline comment widget
@@ -436,112 +444,156 @@ function initApp() {
   function clearAllInlineComments() {
     if (!window.monacoEditor) return;
     window.monacoEditor.changeViewZones(accessor => {
-      inlineCommentWidgets.forEach(({ viewZoneId, decorationIds }) => {
+      inlineCommentWidgets.forEach(({ viewZoneId, decorationIds, contentWidget }) => {
         accessor.removeZone(viewZoneId);
         if (decorationIds) window.monacoEditor.deltaDecorations(decorationIds, []);
+        if (contentWidget) window.monacoEditor.removeContentWidget(contentWidget);
       });
     });
     inlineCommentWidgets.clear();
   }
 
-  // Add a new inline comment from THIS user triggered by clicking the gutter icon
-  // or pressing a keyboard shortcut (Ctrl+Alt+M)
+  // Add a new inline comment from THIS user triggered by the context menu.
+  // Uses a ContentWidget (rendered in Monaco's overlay layer) + empty ViewZone (pushes code down).
+  // ContentWidgets are NOT subject to Monaco's mouse-event capture — buttons/inputs work normally.
   function promptNewInlineComment(lineNumber) {
     if (!collabState.isActive) {
       showStatus('Start a collaboration session first', true);
       return;
     }
 
-    // Show a small inline prompt widget at that line
     const editor = window.monacoEditor;
     if (!editor) return;
 
-    // Prevent duplicate prompt at same line
-    const existingPromptId = `prompt-${lineNumber}`;
-    if (inlineCommentWidgets.has(existingPromptId)) return;
+    const promptId = `prompt-${lineNumber}`;
+    if (inlineCommentWidgets.has(promptId)) return;
 
-    const promptDom = document.createElement('div');
-    promptDom.className = 'ic-widget ic-prompt';
-    promptDom.innerHTML = `
+    // 1. Empty ViewZone — just pushes code down to make visual space
+    const spacerDiv = document.createElement('div');
+    let viewZoneId = null;
+    editor.changeViewZones(accessor => {
+      viewZoneId = accessor.addZone({
+        afterLineNumber: lineNumber,
+        heightInPx: 130,
+        domNode: spacerDiv,
+      });
+    });
+
+    // 2. ContentWidget — lives in Monaco's overlay, fully interactive
+    const widgetDom = document.createElement('div');
+    widgetDom.className = 'ic-prompt-widget';
+    widgetDom.innerHTML = `
       <div class="ic-prompt-inner">
-        <span class="ic-line-label">Line ${lineNumber}</span>
-        <textarea class="ic-prompt-input" rows="2" placeholder="Add a comment on line ${lineNumber}…" maxlength="1000" autofocus></textarea>
+        <span class="ic-line-label">&#x1F4AC; Comment on line ${lineNumber}</span>
+        <textarea class="ic-prompt-input" placeholder="Write a comment\u2026" maxlength="1000"></textarea>
         <div class="ic-prompt-btns">
-          <button class="ic-prompt-submit" title="Post comment">Post</button>
-          <button class="ic-prompt-cancel" title="Cancel">Cancel</button>
+          <button class="ic-prompt-submit">Post</button>
+          <button class="ic-prompt-cancel">Cancel</button>
         </div>
       </div>
     `;
 
-    let promptZoneId = null;
-    editor.changeViewZones(accessor => {
-      promptZoneId = accessor.addZone({
-        afterLineNumber: lineNumber,
-        heightInLines: 4,
-        domNode: promptDom,
-        suppressMouseDown: false,
-      });
+    const contentWidget = {
+      getId: () => promptId,
+      getDomNode: () => widgetDom,
+      getPosition: () => ({
+        position: { lineNumber: lineNumber + 1, column: 1 },
+        preference: [monaco.editor.ContentWidgetPositionPreference.EXACT],
+      }),
+    };
+
+    editor.addContentWidget(contentWidget);
+
+    inlineCommentWidgets.set(promptId, {
+      domNode: widgetDom,
+      viewZoneId,
+      contentWidget,
+      data: { lineNumber },
     });
 
-    inlineCommentWidgets.set(existingPromptId, { domNode: promptDom, viewZoneId: promptZoneId, data: { lineNumber } });
+    let dismissListener = null;
 
-    // Focus the textarea after the zone renders
-    setTimeout(() => promptDom.querySelector('.ic-prompt-input')?.focus(), 50);
+    const cleanup = () => {
+      editor.removeContentWidget(contentWidget);
+      editor.changeViewZones(accessor => accessor.removeZone(viewZoneId));
+      inlineCommentWidgets.delete(promptId);
+      if (dismissListener) { dismissListener.dispose(); dismissListener = null; }
+    };
 
-    promptDom.querySelector('.ic-prompt-submit').addEventListener('click', () => {
-      const text = promptDom.querySelector('.ic-prompt-input').value.trim();
+    setTimeout(() => widgetDom.querySelector('.ic-prompt-input')?.focus(), 80);
+
+    widgetDom.querySelector('.ic-prompt-submit').addEventListener('click', () => {
+      const text = widgetDom.querySelector('.ic-prompt-input').value.trim();
       if (!text) return;
       sendWs({ type: 'inline-comment', lineNumber, text });
-      // Remove the prompt zone
-      editor.changeViewZones(accessor => accessor.removeZone(promptZoneId));
-      inlineCommentWidgets.delete(existingPromptId);
+      cleanup();
     });
 
-    promptDom.querySelector('.ic-prompt-cancel').addEventListener('click', () => {
-      editor.changeViewZones(accessor => accessor.removeZone(promptZoneId));
-      inlineCommentWidgets.delete(existingPromptId);
+    widgetDom.querySelector('.ic-prompt-cancel').addEventListener('click', cleanup);
+
+    widgetDom.querySelector('.ic-prompt-input').addEventListener('keydown', e => {
+      if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); widgetDom.querySelector('.ic-prompt-submit').click(); }
+      if (e.key === 'Escape') cleanup();
     });
 
-    promptDom.querySelector('.ic-prompt-input').addEventListener('keydown', e => {
-      if (e.key === 'Enter' && !e.shiftKey) {
-        e.preventDefault();
-        promptDom.querySelector('.ic-prompt-submit').click();
-      }
-      if (e.key === 'Escape') {
-        promptDom.querySelector('.ic-prompt-cancel').click();
-      }
+    // Dismiss the prompt when the user clicks anywhere else in the editor
+    dismissListener = editor.onMouseDown((evt) => {
+      if (widgetDom.contains(evt.target?.element)) return;
+      cleanup();
     });
   }
 
-  // Wire the gutter click: clicking the glyph margin on any line opens the comment prompt
+  // Register right-click context menu action for inline comments (once only)
+  let _inlineCommentSetupDone = false;
   function setupInlineCommentGutterClick() {
-    if (!window.monacoEditor) return;
-    window.monacoEditor.onMouseDown(e => {
-      // GUTTER_GLYPH_MARGIN = 2
-      if (e.target.type !== 2) return;
-      if (!collabState.isActive) return;
-      const lineNumber = e.target.position?.lineNumber;
-      if (lineNumber) promptNewInlineComment(lineNumber);
-    });
+    if (!window.monacoEditor || _inlineCommentSetupDone) return;
+    _inlineCommentSetupDone = true;
 
-    // Also support Ctrl+Alt+M shortcut to add comment on current cursor line
-    window.monacoEditor.addCommand(
-      monaco.KeyMod.CtrlCmd | monaco.KeyMod.Alt | monaco.KeyCode.KeyM,
-      () => {
-        if (!collabState.isActive) return;
-        const line = window.monacoEditor.getPosition()?.lineNumber;
+    // Right-click context menu action — the single, discoverable entry point
+    window.monacoEditor.addAction({
+      id: 'add-inline-comment',
+      label: '💬 Add Comment on This Line',
+      contextMenuGroupId: '9_collab',
+      contextMenuOrder: 1,
+      precondition: null,
+      run: function (editor) {
+        if (!collabState.isActive) {
+          showStatus('Start a collaboration session first to comment.', true);
+          return;
+        }
+        const line = editor.getPosition()?.lineNumber;
         if (line) promptNewInlineComment(line);
-      }
-    );
+      },
+    });
   }
 
   injectPermissionPanel();
   injectJoinRequestToast();
   injectChatBox();
   injectInlineCommentStyles();
+  setupInlineCommentGutterClick(); // register gutter click + right-click context menu immediately
 
   // Inject panel styles
   injectCollabStyles();
+
+  // ─── Collab Nav Buttons (Participants / Chat in tab bar) ────────────────────
+  const navParticipantsBtn = document.getElementById('nav-participants-btn');
+  const navChatBtn = document.getElementById('nav-chat-btn');
+
+  if (navParticipantsBtn) {
+    navParticipantsBtn.addEventListener('click', () => toggleParticipantPanel());
+  }
+  if (navChatBtn) {
+    navChatBtn.addEventListener('click', () => {
+      const chatEl = document.getElementById('collab-chat');
+      if (chatEl) chatEl.classList.toggle('collab-chat-hidden');
+    });
+  }
+
+  function setCollabNavButtons(visible) {
+    if (navParticipantsBtn) navParticipantsBtn.hidden = !visible;
+    if (navChatBtn) navChatBtn.hidden = !visible;
+  }
 
   // ─── Participant Panel Rendering ───────────────────────────────────────────
 
@@ -661,7 +713,7 @@ function initApp() {
     container.appendChild(toast);
 
     // Play a subtle alert (if browser allows)
-    try { new Audio('data:audio/wav;base64,//uQRAAAAWMSLwUIYAAsYkXgoQwAEaYLWfkWgAI0wWs/ItAAAGDgYtAgAyN+QWaAAihwMWm4G8QQRDiMcCBcH3Cc+CDv/7xA4Tvh9Rz/y8QADBwMWgQAZG/ILNAARQ4GLTcDeIIIhxGOBAuD7hOfBB3/94gcJ3w+o5/5eIAIAAAVwWgQAVQ2ORaIQwEMAJiDg95G4nQL7mQVWI6GwRcfsZAcsKkJvxgxEjzFUgfHoSQ9Qq7KNwqHwuB13MA4a1q/DmBrHgPcmjiGoh//EwC5nGPEmS4RcfkVKOhJf+WOgoxJclFz3kgn//dBA+ya1GhurNn8zb//9NNutNuhz31f////9vt///z+IdAEAAAK4LQIAKobHItEIYCGAExBwe8jcToF9zIKrEdDYIuP2MgOWFSE34wYiR5iqQPj0JIeoVdlG4VD4XA67mAcNa1fhzA1jwHuTRxDUQ//iYBczjHiTJcIuPyKlHQkv/LHQUYkuSi57yQT//uggfZNajQ3Vmz+Zt//+mm3Wm3Q576v////+32///5/EOgAAADVghQAAAAA==').play().catch(() => {}); } catch(e) {}
+    try { new Audio('data:audio/wav;base64,//uQRAAAAWMSLwUIYAAsYkXgoQwAEaYLWfkWgAI0wWs/ItAAAGDgYtAgAyN+QWaAAihwMWm4G8QQRDiMcCBcH3Cc+CDv/7xA4Tvh9Rz/y8QADBwMWgQAZG/ILNAARQ4GLTcDeIIIhxGOBAuD7hOfBB3/94gcJ3w+o5/5eIAIAAAVwWgQAVQ2ORaIQwEMAJiDg95G4nQL7mQVWI6GwRcfsZAcsKkJvxgxEjzFUgfHoSQ9Qq7KNwqHwuB13MA4a1q/DmBrHgPcmjiGoh//EwC5nGPEmS4RcfkVKOhJf+WOgoxJclFz3kgn//dBA+ya1GhurNn8zb//9NNutNuhz31f////9vt///z+IdAEAAAK4LQIAKobHItEIYCGAExBwe8jcToF9zIKrEdDYIuP2MgOWFSE34wYiR5iqQPj0JIeoVdlG4VD4XA67mAcNa1fhzA1jwHuTRxDUQ//iYBczjHiTJcIuPyKlHQkv/LHQUYkuSi57yQT//uggfZNajQ3Vmz+Zt//+mm3Wm3Q576v////+32///5/EOgAAADVghQAAAAA==').play().catch(() => { }); } catch (e) { }
   }
 
   // ─── Intruder Alert (Host UI) ──────────────────────────────────────────────
@@ -716,7 +768,7 @@ function initApp() {
   // ─── Helpers ──────────────────────────────────────────────────────────────
 
   function escHtml(str) {
-    return String(str || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+    return String(str || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
   }
 
   function formatTime(iso) {
@@ -952,6 +1004,11 @@ function initApp() {
         (message.comments || []).forEach(c => addInlineCommentWidget(c));
         break;
 
+      // ── Cursor Presence ─────────────────────────────────────────────────
+      case 'cursor:update':
+        renderRemoteCursor(message);
+        break;
+
       default:
         console.warn('[Collab] Unknown message type:', type);
     }
@@ -996,6 +1053,126 @@ function initApp() {
     });
   }
 
+  // ─── Cursor Presence ──────────────────────────────────────────────────────
+  // Track remote participants' cursor positions using Monaco decorations.
+  // No cursor state is persisted — decorations are purely ephemeral.
+
+  const CURSOR_COLORS = [
+    '#f38ba8', '#a6e3a1', '#89b4fa', '#fab387', '#cba6f7',
+    '#f9e2af', '#94e2d5', '#74c7ec', '#f2cdcd', '#b4befe',
+  ];
+  // userId → { decorationIds: string[], color: string }
+  const remoteCursors = new Map();
+  let cursorColorIndex = 0;
+
+  function getCursorColor(userId) {
+    const existing = remoteCursors.get(userId);
+    if (existing) return existing.color;
+    const color = CURSOR_COLORS[cursorColorIndex % CURSOR_COLORS.length];
+    cursorColorIndex++;
+    return color;
+  }
+
+  // Ensure a dynamic CSS class exists for this user's cursor color
+  function ensureCursorCSS(userId, color) {
+    const clsId = 'cursor-color-' + userId.replace(/[^a-zA-Z0-9]/g, '-');
+    if (document.getElementById(clsId)) return clsId;
+    const style = document.createElement('style');
+    style.id = clsId;
+    style.textContent = `
+      .remote-cursor-${clsId} {
+        background: ${color};
+        width: 2px !important;
+        margin-left: -1px;
+      }
+      .remote-cursor-label-${clsId}::after {
+        content: attr(data-username);
+        position: absolute;
+        top: -18px;
+        left: 0;
+        background: ${color};
+        color: #1e1e2e;
+        font-size: 10px;
+        font-weight: 700;
+        padding: 1px 5px;
+        border-radius: 3px;
+        white-space: nowrap;
+        pointer-events: none;
+        z-index: 100;
+        line-height: 14px;
+      }
+    `;
+    document.head.appendChild(style);
+    return clsId;
+  }
+
+  function renderRemoteCursor(message) {
+    if (!window.monacoEditor) return;
+    const { userId, displayName, position } = message;
+    if (!userId || !position) return;
+
+    const line = position.line || 1;
+    const column = position.column || 1;
+    const color = getCursorColor(userId);
+    const clsId = ensureCursorCSS(userId, color);
+
+    // Remove old decorations for this user
+    const prev = remoteCursors.get(userId);
+    const oldIds = prev ? prev.decorationIds : [];
+
+    const newIds = window.monacoEditor.deltaDecorations(oldIds, [
+      {
+        range: new monaco.Range(line, column, line, column),
+        options: {
+          className: `remote-cursor-${clsId}`,
+          stickiness: 1, // NeverGrowsWhenTypingAtEdges
+        },
+      },
+      {
+        range: new monaco.Range(line, column, line, column),
+        options: {
+          afterContentClassName: `remote-cursor-label-${clsId}`,
+          after: { content: ' ', inlineClassName: `remote-cursor-label-${clsId}` },
+          stickiness: 1,
+        },
+      },
+    ]);
+
+    // Attach data-username attribute for the CSS ::after content
+    setTimeout(() => {
+      document.querySelectorAll(`.remote-cursor-label-${clsId}`).forEach(el => {
+        el.setAttribute('data-username', displayName || userId);
+      });
+    }, 0);
+
+    remoteCursors.set(userId, { decorationIds: newIds, color });
+  }
+
+  function clearAllRemoteCursors() {
+    if (!window.monacoEditor) return;
+    remoteCursors.forEach(({ decorationIds }) => {
+      window.monacoEditor.deltaDecorations(decorationIds, []);
+    });
+    remoteCursors.clear();
+    cursorColorIndex = 0;
+  }
+
+  function setupCursorBroadcast() {
+    if (!window.monacoEditor) return;
+    window.monacoEditor.onDidChangeCursorPosition(function (e) {
+      if (!collabState.isActive) return;
+      const filePath = document.getElementById('current-tab')?.dataset?.filePath || '';
+      sendWs({
+        type: 'cursor:update',
+        filePath,
+        position: {
+          line: e.position.lineNumber,
+          column: e.position.column,
+        },
+      });
+    });
+  }
+
   // ─── Collaboration Start/End ───────────────────────────────────────────────
 
   function startCollaborationSession(displayName) {
@@ -1011,8 +1188,9 @@ function initApp() {
     notifyCollabStateChange();
     connectWebSocket();
     setupMonacoCollaboration();
-    setupInlineCommentGutterClick();
+    setupCursorBroadcast();
     setChatVisible(true);
+    setCollabNavButtons(true);
     showStatus(`Collaboration started! Room ID: ${roomId}`, false);
   }
 
@@ -1029,8 +1207,9 @@ function initApp() {
     notifyCollabStateChange();
     connectWebSocket();
     setupMonacoCollaboration();
-    setupInlineCommentGutterClick();
+    setupCursorBroadcast();
     setChatVisible(true);
+    setCollabNavButtons(true);
     showStatus(`Joining room ${roomId}…`);
   }
 
@@ -1051,6 +1230,8 @@ function initApp() {
     toggleParticipantPanel(false);
     setChatVisible(false);
     clearAllInlineComments();
+    clearAllRemoteCursors();
+    setCollabNavButtons(false);
 
     // Clear intruder log and join toasts
     const entriesEl = document.getElementById('collab-intruder-log-entries');
@@ -1269,6 +1450,8 @@ function initApp() {
       el.addEventListener('click', async () => {
         const result = await window.editorAPI.readFile(node.path);
         if (result.error) { showStatus('Error: ' + result.error, true); return; }
+        // Clear inline comments from previous file before switching
+        clearAllInlineComments();
         setEditorContent(result.content, getLanguageFromPath(node.path));
         currentTab.textContent = node.name;
         currentTab.dataset.filePath = node.path;
@@ -1330,52 +1513,49 @@ function initApp() {
     terminalPanelEl.style.display = isTerminalVisible ? '' : 'none';
   }
 
-  openFileBtn.addEventListener('click', async function () {
-    const result = await window.editorAPI.openFile();
-    if (!result) return;
-    setEditorContent(result.content, getLanguageFromPath(result.filePath));
-    const fileName = result.filePath.replace(/^.*[/\\]/, '');
-    currentTab.textContent = fileName;
-    currentTab.dataset.filePath = result.filePath;
-    setActiveFile(result.filePath);
-  });
-
-  openFolderBtn.addEventListener('click', async function () {
-    const tree = await window.editorAPI.openFolder();
-    if (!tree) return;
-    currentFolderRoot = tree.path;
-    setExplorerTreeFromBackendTree(tree);
-    renderRecentProjects(await window.editorAPI.getRecentProjects());
-  });
-
-  if (!newFileBtn) console.error('[initApp] newFileBtn not found');
-  newFileBtn?.addEventListener('click', async function () {
-    if (!currentFolderRoot) { showStatus('Open a folder first', true); return; }
-    const fileName = window.prompt('File name (e.g. script.js):', 'untitled.js');
-    if (fileName === null) return;
-    const trimmed = fileName.trim();
-    if (!trimmed) { showStatus('File name cannot be empty', true); return; }
-    if (trimmed.includes('/') || trimmed.includes('\\') || trimmed === '.' || trimmed === '..') {
-      showStatus('Invalid file name', true); return;
+  document.addEventListener('keydown', function (event) {
+    if (event.target.id === 'terminal-input') return;
+    if (!event.ctrlKey) return;
+    if (event.key === 's') {
+      event.preventDefault();
+      const isSaveAs = event.shiftKey;
+      if (window.editorAPI && typeof window.editorAPI.onMenuCommand === 'function') {
+        const action = isSaveAs ? 'save-as' : 'save';
+        // Wait, best to just call the logic in onMenuCommand switch if we had it exported,
+        // but since we only have the closure we emit an IPC to main and let it bounce back or just duplicate it briefly.
+      }
+      return;
     }
-    const result = await window.editorAPI.createFile(currentFolderRoot, trimmed);
-    if (result.error) { showStatus(result.error, true); return; }
-    const tree = await window.editorAPI.getFolderTree(currentFolderRoot);
-    if (tree) setExplorerTreeFromBackendTree(tree);
-    const openResult = await window.editorAPI.readFile(result.filePath);
-    if (openResult.error) { showStatus('Created but could not open: ' + openResult.error, true); return; }
-    setEditorContent(openResult.content, getLanguageFromPath(result.filePath));
-    currentTab.textContent = trimmed;
-    currentTab.dataset.filePath = result.filePath;
-    setActiveFile(result.filePath);
-    showStatus('Created ' + trimmed);
   });
 
-  saveBtn.addEventListener('click', async function () {
+  // ─── Native Menu Integration ───────────────────────────────────────────────
+
+  async function performSave() {
     const filePath = currentTab.dataset.filePath;
     if (!filePath) { showStatus('No file open', true); return; }
     const result = await window.editorAPI.saveFile(filePath, getEditorContent());
     result.success ? showStatus('Saved') : showStatus('Error: ' + (result.error || 'Save failed'), true);
+  }
+
+  async function performSaveAs() {
+    const result = await window.editorAPI.saveFileAs(getEditorContent());
+    if (result.cancelled) return;
+    if (result.error) { showStatus('Error: ' + result.error, true); return; }
+    const fileName = result.filePath.replace(/^.*[/\\]/, '');
+    currentTab.dataset.filePath = result.filePath;
+    currentTab.textContent = fileName;
+    setActiveFile(result.filePath);
+    showStatus('Saved as ' + fileName);
+  }
+
+  document.addEventListener('keydown', function (event) {
+    if (event.target.id === 'terminal-input') return;
+    if (!event.ctrlKey) return;
+    if (event.key === 's') {
+      event.preventDefault();
+      event.shiftKey ? performSaveAs() : performSave();
+      return;
+    }
   });
 
   (async function loadRecentProjects() {
@@ -1411,55 +1591,126 @@ function initApp() {
     await window.editorAPI.writeTerminal(command);
   });
 
-  runBtn.addEventListener('click', async function () {
-    const filePath = currentTab.dataset.filePath;
-    if (!filePath) { showStatus('No file open', true); return; }
-    const dotIdx = filePath.lastIndexOf('.');
-    const ext = dotIdx >= 0 ? filePath.substring(dotIdx).toLowerCase() : '(no extension)';
-    if (!['.js', '.py'].includes(ext)) {
-      showStatus('Unsupported file type. Supported: .js, .py', true); return;
-    }
-    const saveResult = await window.editorAPI.saveFile(filePath, getEditorContent());
-    if (!saveResult.success) { showStatus('Save failed: ' + (saveResult.error || 'Unknown error'), true); return; }
-    const result = await window.editorAPI.runCurrentFile(filePath);
-    if (result.error) { showStatus(result.error, true); return; }
-    showStatus('Running ' + currentTab.textContent);
-  });
-
-  saveAsBtn.addEventListener('click', async function () {
-    const result = await window.editorAPI.saveFileAs(getEditorContent());
-    if (result.cancelled) return;
-    if (result.error) { showStatus('Error: ' + result.error, true); return; }
-    const fileName = result.filePath.replace(/^.*[/\\]/, '');
-    currentTab.dataset.filePath = result.filePath;
-    currentTab.textContent = fileName;
-    setActiveFile(result.filePath);
-    showStatus('Saved as ' + fileName);
-  });
-
-  document.addEventListener('keydown', function (event) {
-    if (event.target.id === 'terminal-input') return;
-    if (!event.ctrlKey) return;
-    if (event.key === 's') {
-      event.preventDefault();
-      event.shiftKey ? saveAsBtn.click() : saveBtn.click();
-      return;
-    }
-    if (event.key === 'o') { event.preventDefault(); openFileBtn.click(); }
-  });
-
   if (window.editorAPI && typeof window.editorAPI.onMenuCommand === 'function') {
-    window.editorAPI.onMenuCommand(function (command) {
+    window.editorAPI.onMenuCommand(async function (command) {
       switch (command) {
-        case 'open-file': openFileBtn?.click(); break;
-        case 'open-folder': openFolderBtn?.click(); break;
-        case 'save': saveBtn?.click(); break;
-        case 'save-as': saveAsBtn?.click(); break;
+        case 'new-file': {
+          if (!currentFolderRoot) { showStatus('Open a folder first', true); return; }
+          const fileName = window.prompt('File name (e.g. script.js):', 'untitled.js');
+          if (fileName === null) return;
+          const trimmed = fileName.trim();
+          if (!trimmed) { showStatus('File name cannot be empty', true); return; }
+          if (trimmed.includes('/') || trimmed.includes('\\') || trimmed === '.' || trimmed === '..') {
+            showStatus('Invalid file name', true); return;
+          }
+          const result = await window.editorAPI.createFile(currentFolderRoot, trimmed);
+          if (result.error) { showStatus(result.error, true); return; }
+          const tree = await window.editorAPI.getFolderTree(currentFolderRoot);
+          if (tree) setExplorerTreeFromBackendTree(tree);
+          const openResult = await window.editorAPI.readFile(result.filePath);
+          if (openResult.error) { showStatus('Created but could not open: ' + openResult.error, true); return; }
+          clearAllInlineComments();
+          setEditorContent(openResult.content, getLanguageFromPath(result.filePath));
+          currentTab.textContent = trimmed;
+          currentTab.dataset.filePath = result.filePath;
+          setActiveFile(result.filePath);
+          showStatus('Created ' + trimmed);
+          break;
+        }
+        case 'open-file': {
+          const result = await window.editorAPI.openFile();
+          if (!result) return;
+          clearAllInlineComments();
+          setEditorContent(result.content, getLanguageFromPath(result.filePath));
+          const fileName = result.filePath.replace(/^.*[/\\]/, '');
+          currentTab.textContent = fileName;
+          currentTab.dataset.filePath = result.filePath;
+          setActiveFile(result.filePath);
+          break;
+        }
+        case 'open-folder': {
+          const tree = await window.editorAPI.openFolder();
+          if (!tree) return;
+          currentFolderRoot = tree.path;
+          setExplorerTreeFromBackendTree(tree);
+          renderRecentProjects(await window.editorAPI.getRecentProjects());
+          break;
+        }
+        case 'save': performSave(); break;
+        case 'save-as': performSaveAs(); break;
+        case 'close-file': {
+          setEditorContent('', 'plaintext');
+          currentTab.textContent = 'untitled';
+          currentTab.dataset.filePath = '';
+          setActiveFile('');
+          showStatus('File closed');
+          break;
+        }
+        case 'run-file': {
+          const filePath = currentTab.dataset.filePath;
+          if (!filePath) { showStatus('No file open', true); return; }
+          const dotIdx = filePath.lastIndexOf('.');
+          const ext = dotIdx >= 0 ? filePath.substring(dotIdx).toLowerCase() : '(no extension)';
+          if (!['.js', '.py'].includes(ext)) {
+            showStatus('Unsupported file type. Supported: .js, .py', true); return;
+          }
+          const saveResult = await window.editorAPI.saveFile(filePath, getEditorContent());
+          if (!saveResult.success) { showStatus('Save failed: ' + (saveResult.error || 'Unknown error'), true); return; }
+          const runResult = await window.editorAPI.runCurrentFile(filePath);
+          if (runResult.error) { showStatus(runResult.error, true); return; }
+          showStatus('Running ' + currentTab.textContent);
+          break;
+        }
         case 'toggle-explorer': toggleExplorerVisibility(); break;
         case 'toggle-terminal': toggleTerminalVisibility(); break;
         case 'toggle-participants': toggleParticipantPanel(); break;
-        case 'collab-start': document.querySelector('.collab-btn-primary')?.click(); break;
-        case 'collab-join': document.querySelector('.collab-btn:not(.collab-btn-primary)')?.click(); break;
+        case 'collab-start': {
+          const modalBackdrop = document.querySelector('.collab-modal-backdrop');
+          const startSection = document.querySelector('.collab-form-section-start');
+          const joinSection = document.querySelector('.collab-form-section-join');
+          const startActionBtn = document.querySelector('.collab-primary-action[data-action="start"]');
+          const joinActionBtn = document.querySelector('.collab-primary-action-join');
+          const modeTabs = document.querySelectorAll('.collab-mode-tab');
+
+          if (modalBackdrop) {
+            modalBackdrop.classList.remove('collab-modal-hidden');
+            modalBackdrop.setAttribute('aria-hidden', 'false');
+
+            modeTabs.forEach(tab => {
+              const active = tab.dataset.mode === 'start';
+              tab.classList.toggle('collab-mode-tab-active', active);
+              tab.setAttribute('aria-selected', String(active));
+            });
+            startSection.style.display = 'flex';
+            joinSection.style.display = 'none';
+            startActionBtn.style.display = 'inline-block';
+            joinActionBtn.style.display = 'none';
+          }
+          break;
+        }
+        case 'collab-join': {
+          const modalBackdrop = document.querySelector('.collab-modal-backdrop');
+          const startSection = document.querySelector('.collab-form-section-start');
+          const joinSection = document.querySelector('.collab-form-section-join');
+          const startActionBtn = document.querySelector('.collab-primary-action[data-action="start"]');
+          const joinActionBtn = document.querySelector('.collab-primary-action-join');
+          const modeTabs = document.querySelectorAll('.collab-mode-tab');
+
+          if (modalBackdrop) {
+            modalBackdrop.classList.remove('collab-modal-hidden');
+            modalBackdrop.setAttribute('aria-hidden', 'false');
+            modeTabs.forEach(tab => {
+              const active = tab.dataset.mode === 'join';
+              tab.classList.toggle('collab-mode-tab-active', active);
+              tab.setAttribute('aria-selected', String(active));
+            });
+            startSection.style.display = 'none';
+            joinSection.style.display = 'flex';
+            startActionBtn.style.display = 'none';
+            joinActionBtn.style.display = 'inline-block';
+          }
+          break;
+        }
         case 'collab-end': endCollaboration(false); break;
         default: break;
       }
@@ -2009,7 +2260,18 @@ function injectCollabStyles() {
       font-weight: 600;
     }
     /* Inline comment prompt widget */
-    .ic-prompt { padding: 4px 8px; }
+    .ic-widget {
+      box-sizing: border-box;
+      overflow: hidden;
+      width: 100%;
+    }
+    /* ContentWidget prompt — positioned by Monaco in overlay layer */
+    .ic-prompt-widget {
+      width: 480px;
+      max-width: 90vw;
+      padding: 4px 0;
+      z-index: 100;
+    }
     .ic-prompt-inner {
       background: #1e1e2e;
       border: 1px dashed #cba6f7;
@@ -2031,6 +2293,7 @@ function injectCollabStyles() {
       outline: none;
       width: 100%;
       box-sizing: border-box;
+      cursor: text !important;
     }
     .ic-prompt-input:focus { border-color: #cba6f7; }
     .ic-prompt-btns { display: flex; gap: 6px; }
@@ -2042,7 +2305,7 @@ function injectCollabStyles() {
       padding: 4px 12px;
       font-size: 11px;
       font-weight: 700;
-      cursor: pointer;
+      cursor: pointer !important;
     }
     .ic-prompt-cancel {
       background: #45475a;
@@ -2051,7 +2314,7 @@ function injectCollabStyles() {
       border-radius: 5px;
       padding: 4px 10px;
       font-size: 11px;
-      cursor: pointer;
+      cursor: pointer !important;
     }
     /* Gutter icon shown in the Monaco line number margin */
     .ic-gutter-icon {

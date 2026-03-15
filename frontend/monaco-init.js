@@ -32,6 +32,7 @@
       theme: 'vs-dark',
       automaticLayout: true,
       minimap: { enabled: true },
+      glyphMargin: true,
       fontSize: 14,
       fontFamily: '"Cascadia Code", "Consolas", "Monaco", "Courier New", monospace',
       scrollBeyondLastLine: false,

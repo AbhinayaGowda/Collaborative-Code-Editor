@@ -89,6 +89,10 @@ function handleMessage(ws, userId, data) {
       // Host or comment author marks a thread resolved
       handleInlineCommentResolve(ws, data);
       break;
+    case 'cursor:update':
+      // Relay cursor position to other participants — no persistence
+      handleCursorUpdate(ws, data);
+      break;
     default:
       console.warn(`[Server] Unknown message type: ${type} from ${userId}`);
   }
@@ -592,6 +596,19 @@ function logIntruder(ws, userId, displayName, reason) {
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
+
+function handleCursorUpdate(ws, data) {
+  const info = userInfo.get(ws);
+  if (!info) return;
+
+  broadcastToRoom(info.roomId, ws, {
+    type: 'cursor:update',
+    userId: ws.userId,
+    displayName: info.displayName,
+    filePath: data.filePath || '',
+    position: data.position || { line: 1, column: 1 },
+  });
+}
 
 function addUserToRoom(ws, roomId, displayName, role, userId) {
   const joinedAt = new Date().toISOString();
