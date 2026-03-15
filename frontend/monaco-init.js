@@ -26,6 +26,7 @@
       'app.whenReady().then(createWindow);',
     ].join('\n');
 
+<<<<<<< HEAD
     monaco.editor.defineTheme('editor-dark', {
       base: 'vs-dark',
       inherit: true,
@@ -43,6 +44,14 @@
       automaticLayout: true,
       minimap: { enabled: true },
       glyphMargin: true,
+=======
+    window.monacoEditor = monaco.editor.create(container, {
+      value: initialContent,
+      language: 'javascript',
+      theme: 'vs-dark',
+      automaticLayout: true,
+      minimap: { enabled: true },
+>>>>>>> b20941aa8d7343727d725c2d5f94d95e87f36c61
       fontSize: 14,
       fontFamily: '"Cascadia Code", "Consolas", "Monaco", "Courier New", monospace',
       scrollBeyondLastLine: false,

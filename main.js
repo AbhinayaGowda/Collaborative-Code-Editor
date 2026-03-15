@@ -1,5 +1,9 @@
+<<<<<<< HEAD
 const electron = require('electron');
 const { app, BrowserWindow, ipcMain, dialog, Menu } = electron;
+=======
+const { app, BrowserWindow, ipcMain, dialog } = require('electron');
+>>>>>>> b20941aa8d7343727d725c2d5f94d95e87f36c61
 const path = require('path');
 const fs = require('fs');
 const http = require('http');
@@ -51,6 +55,7 @@ function createStaticServer() {
   });
 }
 
+<<<<<<< HEAD
 let mainWindow = null;
 
 function setEditorMenu() {
@@ -99,6 +104,8 @@ function setEditorMenu() {
   Menu.setApplicationMenu(menu);
 }
 
+=======
+>>>>>>> b20941aa8d7343727d725c2d5f94d95e87f36c61
 async function createWindow() {
   const port = await createStaticServer();
   const win = new BrowserWindow({
@@ -110,6 +117,7 @@ async function createWindow() {
       preload: path.join(__dirname, 'preload.js'),
     },
   });
+<<<<<<< HEAD
   mainWindow = win;
   Menu.setApplicationMenu(null);
   win.loadURL(`http://127.0.0.1:${port}/frontend/auth.html`);
@@ -130,6 +138,12 @@ ipcMain.on('collab-state-changed', (event, isActive) => {
   }
 });
 
+=======
+
+  win.loadURL(`http://127.0.0.1:${port}/frontend/index.html`);
+}
+
+>>>>>>> b20941aa8d7343727d725c2d5f94d95e87f36c61
 ipcMain.handle('open-file', async () => {
   const win = BrowserWindow.getFocusedWindow();
   if (!win) return null;
