@@ -11,10 +11,6 @@
     "electron": "^33.0.0"
   },
   "dependencies": {
-<<<<<<< HEAD
-    "firebase": "^11.0.0",
-=======
->>>>>>> b20941aa8d7343727d725c2d5f94d95e87f36c61
     "monaco-editor": "^0.55.1",
     "ws": "^8.19.0"
   }

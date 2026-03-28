@@ -24,28 +24,13 @@ function initApp() {
   const editor = window.monacoEditor;
   console.log('[initApp] running, monacoEditor:', !!editor);
   if (!editor) return;
-<<<<<<< HEAD
-  if (window.editorAPI && typeof window.editorAPI.showEditorMenu === 'function') {
-    window.editorAPI.showEditorMenu();
-  }
 
-=======
-
-  const openFileBtn = document.querySelector('.open-file-btn');
-  const openFolderBtn = document.querySelector('.open-folder-btn');
-  const newFileBtn = document.querySelector('.new-file-btn');
-  console.log('[initApp] newFileBtn:', newFileBtn ? 'found' : 'NULL');
-  const saveBtn = document.querySelector('.save-btn');
-  const saveAsBtn = document.querySelector('.save-as-btn');
-  const runBtn = document.querySelector('.run-btn');
->>>>>>> b20941aa8d7343727d725c2d5f94d95e87f36c61
   const currentTab = document.getElementById('current-tab');
   const statusMessage = document.getElementById('status-message');
   const folderTreeEmpty = document.getElementById('folder-tree-empty');
   const folderTree = document.getElementById('folder-tree');
   const recentProjectsList = document.getElementById('recent-projects-list');
 
-<<<<<<< HEAD
   // ─── Collaboration State ───────────────────────────────────────────────────
 
   const collabState = {
@@ -267,7 +252,7 @@ function initApp() {
   // Uses Monaco's ViewZone API so the thread appears inline below the
   // commented line without overlapping the code.
 
-  // commentId → { domNode, viewZoneId, data }
+  // commentId or promptId → { domNode, viewZoneId, decorationIds?, contentWidget?, data, isMinimized? }
   const inlineCommentWidgets = new Map();
 
   function injectInlineCommentStyles() {
@@ -320,11 +305,11 @@ function initApp() {
     ['mousedown', 'mouseup', 'click', 'pointerdown'].forEach(evt => {
       domNode.addEventListener(evt, e => e.stopPropagation());
     });
-    // Collapse arrow removes the entire comment widget (ViewZone + decoration)
+    // Collapse arrow collapses the thread but keeps the gutter marker so it can be reopened
     const collapseBtn = domNode.querySelector('.ic-collapse-btn');
     if (collapseBtn) {
       collapseBtn.addEventListener('click', () => {
-        removeInlineCommentWidget(comment.id);
+        minimizeInlineCommentWidget(comment.id);
       });
     }
 
@@ -396,7 +381,63 @@ function initApp() {
       });
     });
 
-    inlineCommentWidgets.set(comment.id, { domNode, viewZoneId, decorationIds: decorations, data: comment });
+    inlineCommentWidgets.set(comment.id, {
+      domNode,
+      viewZoneId,
+      decorationIds: decorations,
+      data: comment,
+      isMinimized: false,
+    });
+  }
+
+  // Collapse a thread: remove the ViewZone but keep decorations and data so it can be reopened
+  function minimizeInlineCommentWidget(id) {
+    const widget = inlineCommentWidgets.get(id);
+    if (!widget) return;
+    const editor = window.monacoEditor;
+    if (!editor) return;
+    if (widget.viewZoneId) {
+      editor.changeViewZones(accessor => accessor.removeZone(widget.viewZoneId));
+      widget.viewZoneId = null;
+    }
+    widget.isMinimized = true;
+  }
+
+  // Ensure a thread widget is visible (re-create its ViewZone if needed)
+  function ensureInlineCommentWidgetVisible(comment) {
+    const existing = inlineCommentWidgets.get(comment.id);
+    if (!window.monacoEditor) return;
+
+    // If it already exists and is not minimized, nothing to do
+    if (existing && !existing.isMinimized && existing.viewZoneId) {
+      return;
+    }
+
+    const editor = window.monacoEditor;
+    let domNode;
+    let viewZoneId = null;
+
+    if (existing) {
+      domNode = existing.domNode;
+      existing.isMinimized = false;
+      editor.changeViewZones(accessor => {
+        viewZoneId = accessor.addZone({
+          afterLineNumber: comment.lineNumber,
+          heightInPx: 100 + (comment.replies || []).length * 28,
+          domNode,
+          suppressMouseDown: false,
+        });
+      });
+      existing.viewZoneId = viewZoneId;
+      // Also refresh the HTML so replies / resolved state are up to date
+      domNode.innerHTML = buildCommentThreadHTML(comment);
+      wireCommentWidgetEvents(domNode, comment);
+      existing.data = comment;
+      return;
+    }
+
+    // If no widget exists yet (e.g. this line came from history), delegate to addInlineCommentWidget
+    addInlineCommentWidget(comment);
   }
 
   // Remove a single inline comment widget (ViewZone + decoration) by its id
@@ -405,9 +446,15 @@ function initApp() {
     if (!widget) return;
     const editor = window.monacoEditor;
     if (!editor) return;
-    editor.changeViewZones(accessor => accessor.removeZone(widget.viewZoneId));
-    if (widget.decorationIds) editor.deltaDecorations(widget.decorationIds, []);
-    if (widget.contentWidget) editor.removeContentWidget(widget.contentWidget);
+    if (widget.viewZoneId) {
+      editor.changeViewZones(accessor => accessor.removeZone(widget.viewZoneId));
+    }
+    if (widget.decorationIds) {
+      editor.deltaDecorations(widget.decorationIds, []);
+    }
+    if (widget.contentWidget) {
+      editor.removeContentWidget(widget.contentWidget);
+    }
     inlineCommentWidgets.delete(id);
   }
 
@@ -460,7 +507,7 @@ function initApp() {
     if (!window.monacoEditor) return;
     window.monacoEditor.changeViewZones(accessor => {
       inlineCommentWidgets.forEach(({ viewZoneId, decorationIds, contentWidget }) => {
-        accessor.removeZone(viewZoneId);
+        if (viewZoneId) accessor.removeZone(viewZoneId);
         if (decorationIds) window.monacoEditor.deltaDecorations(decorationIds, []);
         if (contentWidget) window.monacoEditor.removeContentWidget(contentWidget);
       });
@@ -480,23 +527,14 @@ function initApp() {
     const editor = window.monacoEditor;
     if (!editor) return;
 
-    const promptId = `prompt-${lineNumber}`;
+    const promptId = 'inline-comment-prompt';
+    // Only one global prompt at a time
     if (inlineCommentWidgets.has(promptId)) return;
 
-    // 1. Empty ViewZone — just pushes code down to make visual space
-    const spacerDiv = document.createElement('div');
-    let viewZoneId = null;
-    editor.changeViewZones(accessor => {
-      viewZoneId = accessor.addZone({
-        afterLineNumber: lineNumber,
-        heightInPx: 130,
-        domNode: spacerDiv,
-      });
-    });
-
-    // 2. ContentWidget — lives in Monaco's overlay, fully interactive
+    // Render the prompt as an overlay in the editor's empty space area
+    const editorContainer = document.getElementById('monaco-container') || document.body;
     const widgetDom = document.createElement('div');
-    widgetDom.className = 'ic-prompt-widget';
+    widgetDom.className = 'ic-global-prompt';
     widgetDom.innerHTML = `
       <div class="ic-prompt-inner">
         <span class="ic-line-label">&#x1F4AC; Comment on line ${lineNumber}</span>
@@ -508,77 +546,46 @@ function initApp() {
       </div>
     `;
 
-    const contentWidget = {
-      getId: () => promptId,
-      getDomNode: () => widgetDom,
-      getPosition: () => ({
-        position: { lineNumber: lineNumber + 1, column: 1 },
-        preference: [monaco.editor.ContentWidgetPositionPreference.EXACT],
-      }),
-    };
-
-    editor.addContentWidget(contentWidget);
+    editorContainer.appendChild(widgetDom);
 
     inlineCommentWidgets.set(promptId, {
       domNode: widgetDom,
-      viewZoneId,
-      contentWidget,
+      viewZoneId: null,
+      contentWidget: null,
       data: { lineNumber },
     });
 
-    let dismissListener = null;
+    const inputEl = widgetDom.querySelector('.ic-prompt-input');
+    setTimeout(() => inputEl?.focus(), 50);
 
     const cleanup = () => {
-      editor.removeContentWidget(contentWidget);
-      editor.changeViewZones(accessor => accessor.removeZone(viewZoneId));
+      widgetDom.remove();
       inlineCommentWidgets.delete(promptId);
-      if (dismissListener) { dismissListener.dispose(); dismissListener = null; }
+      document.removeEventListener('mousedown', onDocumentMouseDown, true);
     };
 
-    setTimeout(() => widgetDom.querySelector('.ic-prompt-input')?.focus(), 80);
+    const onDocumentMouseDown = (evt) => {
+      if (widgetDom.contains(evt.target)) return;
+      cleanup();
+    };
 
-    function waitForWsOpen(timeoutMs) {
-      const start = Date.now();
-      return new Promise((resolve) => {
-        const tick = () => {
-          if (collabState.ws && collabState.ws.readyState === WebSocket.OPEN) return resolve(true);
-          if (Date.now() - start > timeoutMs) return resolve(false);
-          setTimeout(tick, 75);
-        };
-        tick();
-      });
-    }
+    document.addEventListener('mousedown', onDocumentMouseDown, true);
 
-    widgetDom.querySelector('.ic-prompt-submit').addEventListener('click', async () => {
-      const text = widgetDom.querySelector('.ic-prompt-input').value.trim();
+    widgetDom.querySelector('.ic-prompt-submit').addEventListener('click', () => {
+      const text = inputEl.value.trim();
       if (!text) return;
-
-      // If WS isn't ready yet, wait a moment instead of silently dropping.
-      if (!collabState.ws || collabState.ws.readyState !== WebSocket.OPEN) {
-        showStatus('Connecting to collaboration server…');
-        connectWebSocket();
-        const ok = await waitForWsOpen(2500);
-        if (!ok) {
-          showStatus('Not connected to collaboration server. Start it and try again.', true);
-          return; // keep prompt open so user can retry
-        }
-      }
-
       sendWs({ type: 'inline-comment', lineNumber, text });
       cleanup();
     });
 
     widgetDom.querySelector('.ic-prompt-cancel').addEventListener('click', cleanup);
 
-    widgetDom.querySelector('.ic-prompt-input').addEventListener('keydown', e => {
-      if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); widgetDom.querySelector('.ic-prompt-submit').click(); }
+    inputEl.addEventListener('keydown', e => {
+      if (e.key === 'Enter' && !e.shiftKey) {
+        e.preventDefault();
+        widgetDom.querySelector('.ic-prompt-submit').click();
+      }
       if (e.key === 'Escape') cleanup();
-    });
-
-    // Dismiss the prompt when the user clicks anywhere else in the editor
-    dismissListener = editor.onMouseDown((evt) => {
-      if (widgetDom.contains(evt.target?.element)) return;
-      cleanup();
     });
   }
 
@@ -603,6 +610,38 @@ function initApp() {
         const line = editor.getPosition()?.lineNumber;
         if (line) promptNewInlineComment(line);
       },
+    });
+
+    // Gutter click: toggle the inline comment thread for that line (VS Code–style)
+    window.monacoEditor.onMouseDown(e => {
+      if (!collabState.isActive) return;
+      if (!e.target || e.target.type !== monaco.editor.MouseTargetType.GUTTER_GLYPH_MARGIN) return;
+      const lineNumber = e.target.position?.lineNumber;
+      if (!lineNumber) return;
+
+      // Find an existing comment thread anchored to this line
+      let foundComment = null;
+      inlineCommentWidgets.forEach(widget => {
+        if (widget.data && widget.data.id && widget.data.lineNumber === lineNumber && !widget.data.resolved) {
+          foundComment = widget.data;
+        }
+      });
+
+      // If we have a thread, toggle its visibility; otherwise fall back to opening a new comment prompt
+      if (foundComment) {
+        const widget = inlineCommentWidgets.get(foundComment.id);
+        if (widget && widget.viewZoneId && !widget.isMinimized) {
+          minimizeInlineCommentWidget(foundComment.id);
+        } else {
+          ensureInlineCommentWidgetVisible(foundComment);
+          // Try to focus the reply box for faster typing
+          setTimeout(() => {
+            widget?.domNode?.querySelector('.ic-reply-input')?.focus();
+          }, 60);
+        }
+      } else {
+        promptNewInlineComment(lineNumber);
+      }
     });
   }
 
@@ -832,30 +871,6 @@ function initApp() {
     return result;
   }
 
-=======
-  // Collaboration state
-  const collabState = {
-    isActive: false,
-    role: null, // 'host' or 'guest'
-    roomId: null,
-    displayName: null,
-    ws: null, // WebSocket connection
-    isApplyingRemoteUpdate: false, // Flag to prevent feedback loops
-    serverUrl: 'ws://localhost:8080', // Default server URL
-  };
-
-  // Generate a random room ID (8 characters, alphanumeric)
-  function generateRoomId() {
-    const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
-    let result = '';
-    for (let i = 0; i < 8; i++) {
-      result += chars.charAt(Math.floor(Math.random() * chars.length));
-    }
-    return result;
-  }
-
-  // Update collaboration status in status bar
->>>>>>> b20941aa8d7343727d725c2d5f94d95e87f36c61
   function updateCollabStatus() {
     const collabStatusEl = document.getElementById('collab-status');
     if (!collabState.isActive) {
@@ -863,7 +878,6 @@ function initApp() {
       return;
     }
     collabStatusEl.style.display = 'inline';
-<<<<<<< HEAD
     const roleText = collabState.myPermission || (collabState.role === 'host' ? 'Host' : 'Viewer');
     collabStatusEl.textContent = `Collaborating • ${roleText} • Room: ${collabState.roomId}`;
     collabStatusEl.title = `Display name: ${collabState.displayName || 'Unknown'}`;
@@ -880,26 +894,10 @@ function initApp() {
     if (!canEdit) {
       window.monacoEditor.updateOptions({
         readOnlyMessage: { value: 'View-only mode. The host has not granted you edit access.' },
-=======
-    const roleText = collabState.role === 'host' ? 'Host' : 'Guest';
-    collabStatusEl.textContent = `Collaborating • ${roleText} • Room: ${collabState.roomId}`;
-    collabStatusEl.title = `Display name: ${collabState.displayName || 'Unknown'}`;
-  }
-
-  // Update Monaco editor read-only state based on role
-  function updateEditorReadOnly() {
-    if (!window.monacoEditor) return;
-    const isReadOnly = collabState.isActive && collabState.role === 'guest';
-    window.monacoEditor.updateOptions({ readOnly: isReadOnly });
-    if (isReadOnly) {
-      window.monacoEditor.updateOptions({ 
-        readOnlyMessage: { value: 'You are a guest. Only the host can edit.' }
->>>>>>> b20941aa8d7343727d725c2d5f94d95e87f36c61
       });
     }
   }
 
-<<<<<<< HEAD
   function notifyCollabStateChange() {
     if (window.editorAPI && typeof window.editorAPI.notifyCollabState === 'function') {
       window.editorAPI.notifyCollabState(collabState.isActive);
@@ -933,75 +931,20 @@ function initApp() {
       ws.onclose = function () {
         collabState.ws = null;
         if (collabState.isActive) {
-=======
-  // WebSocket connection management
-  function connectWebSocket() {
-    if (collabState.ws && collabState.ws.readyState === WebSocket.OPEN) {
-      console.log('[Collab] WebSocket already connected');
-      return;
-    }
-
-    try {
-      console.log(`[Collab] Connecting to ${collabState.serverUrl}...`);
-      const ws = new WebSocket(collabState.serverUrl);
-
-      ws.onopen = function() {
-        console.log('[Collab] WebSocket connected');
-        // Join room after connection is established
-        if (collabState.roomId && collabState.displayName) {
-          joinRoomViaWebSocket();
-        }
-      };
-
-      ws.onmessage = function(event) {
-        try {
-          const message = JSON.parse(event.data);
-          handleWebSocketMessage(message);
-        } catch (error) {
-          console.error('[Collab] Failed to parse WebSocket message:', error);
-        }
-      };
-
-      ws.onerror = function(error) {
-        console.error('[Collab] WebSocket error:', error);
-        showStatus('Connection error. Check if server is running.', true);
-      };
-
-      ws.onclose = function() {
-        console.log('[Collab] WebSocket closed');
-        collabState.ws = null;
-        // Attempt reconnection if collaboration is still active
-        if (collabState.isActive) {
-          console.log('[Collab] Attempting to reconnect...');
->>>>>>> b20941aa8d7343727d725c2d5f94d95e87f36c61
           setTimeout(connectWebSocket, 2000);
         }
       };
 
       collabState.ws = ws;
-<<<<<<< HEAD
     } catch (err) {
-=======
-    } catch (error) {
-      console.error('[Collab] Failed to create WebSocket:', error);
->>>>>>> b20941aa8d7343727d725c2d5f94d95e87f36c61
       showStatus('Failed to connect to collaboration server', true);
     }
   }
 
   function disconnectWebSocket() {
     if (collabState.ws) {
-<<<<<<< HEAD
       if (collabState.ws.readyState === WebSocket.OPEN && collabState.roomId) {
         sendWs({ type: 'leave', roomId: collabState.roomId });
-=======
-      // Send leave message before closing
-      if (collabState.ws.readyState === WebSocket.OPEN && collabState.roomId) {
-        collabState.ws.send(JSON.stringify({
-          type: 'leave',
-          roomId: collabState.roomId
-        }));
->>>>>>> b20941aa8d7343727d725c2d5f94d95e87f36c61
       }
       collabState.ws.close();
       collabState.ws = null;
@@ -1009,7 +952,6 @@ function initApp() {
   }
 
   function joinRoomViaWebSocket() {
-<<<<<<< HEAD
     if (!collabState.ws || collabState.ws.readyState !== WebSocket.OPEN) return;
     sendWs({ type: 'join', roomId: collabState.roomId, displayName: collabState.displayName });
   }
@@ -1143,63 +1085,6 @@ function initApp() {
       // ── Cursor Presence ─────────────────────────────────────────────────
       case 'cursor:update':
         renderRemoteCursor(message);
-=======
-    if (!collabState.ws || collabState.ws.readyState !== WebSocket.OPEN) {
-      console.warn('[Collab] Cannot join room: WebSocket not connected');
-      return;
-    }
-
-    if (!collabState.roomId || !collabState.displayName) {
-      console.warn('[Collab] Cannot join room: missing roomId or displayName');
-      return;
-    }
-
-    console.log(`[Collab] Joining room ${collabState.roomId} as ${collabState.displayName}`);
-    collabState.ws.send(JSON.stringify({
-      type: 'join',
-      roomId: collabState.roomId,
-      displayName: collabState.displayName
-    }));
-  }
-
-  function handleWebSocketMessage(message) {
-    const { type, roomId, content, userId, displayName } = message;
-
-    switch (type) {
-      case 'connected':
-        console.log('[Collab] Server confirmed connection, userId:', message.userId);
-        // If we're already in a room, join it now
-        if (collabState.roomId && collabState.displayName) {
-          joinRoomViaWebSocket();
-        }
-        break;
-
-      case 'joined':
-        console.log(`[Collab] Successfully joined room: ${roomId}`);
-        showStatus(`Connected to room ${roomId}`, false);
-        break;
-
-      case 'editor-update':
-        // Apply remote editor update (only if not from our own change)
-        if (content !== undefined && !collabState.isApplyingRemoteUpdate) {
-          applyRemoteEditorUpdate(content);
-        }
-        break;
-
-      case 'user-joined':
-        console.log(`[Collab] User joined: ${displayName} (${userId})`);
-        showStatus(`${displayName} joined the room`, false);
-        break;
-
-      case 'user-left':
-        console.log(`[Collab] User left: ${displayName} (${userId})`);
-        showStatus(`${displayName} left the room`, false);
-        break;
-
-      case 'error':
-        console.error('[Collab] Server error:', message.message);
-        showStatus(`Server error: ${message.message}`, true);
->>>>>>> b20941aa8d7343727d725c2d5f94d95e87f36c61
         break;
 
       default:
@@ -1207,7 +1092,6 @@ function initApp() {
     }
   }
 
-<<<<<<< HEAD
   // ─── Editor Sync ───────────────────────────────────────────────────────────
 
   function applyRemoteEditorUpdate(content) {
@@ -1216,29 +1100,12 @@ function initApp() {
     try {
       const position = window.monacoEditor.getPosition();
       window.monacoEditor.setValue(content || '');
-=======
-  function applyRemoteEditorUpdate(content) {
-    if (!window.monacoEditor) return;
-
-    // Set flag to prevent feedback loop
-    collabState.isApplyingRemoteUpdate = true;
-
-    try {
-      // Get current cursor position to restore it after update
-      const position = window.monacoEditor.getPosition();
-      
-      // Apply the remote content (simple full document replace)
-      window.monacoEditor.setValue(content || '');
-
-      // Restore cursor position if possible
->>>>>>> b20941aa8d7343727d725c2d5f94d95e87f36c61
       if (position) {
         const model = window.monacoEditor.getModel();
         if (model && model.getLineCount() >= position.lineNumber) {
           window.monacoEditor.setPosition(position);
         }
       }
-<<<<<<< HEAD
     } catch (err) {
       console.error('[Collab] Error applying remote update:', err);
     } finally {
@@ -1458,48 +1325,6 @@ function initApp() {
   // ─── Collaboration Modal ───────────────────────────────────────────────────
 
   function initCollaboration() {
-=======
-    } catch (error) {
-      console.error('[Collab] Error applying remote update:', error);
-    } finally {
-      // Reset flag after a short delay to allow any queued updates
-      setTimeout(() => {
-        collabState.isApplyingRemoteUpdate = false;
-      }, 100);
-    }
-  }
-
-  // Setup Monaco editor change listener for collaboration
-  function setupMonacoCollaboration() {
-    if (!window.monacoEditor) {
-      console.warn('[Collab] Monaco editor not available for collaboration setup');
-      return;
-    }
-
-    // Listen for editor content changes
-    window.monacoEditor.onDidChangeModelContent(function(event) {
-      // Only broadcast if collaboration is active and we're not applying a remote update
-      if (collabState.isActive && !collabState.isApplyingRemoteUpdate && collabState.ws) {
-        const content = window.monacoEditor.getValue();
-        
-        // Only send if WebSocket is open
-        if (collabState.ws.readyState === WebSocket.OPEN && collabState.roomId) {
-          collabState.ws.send(JSON.stringify({
-            type: 'editor-change',
-            roomId: collabState.roomId,
-            content: content
-          }));
-        }
-      }
-    });
-
-    console.log('[Collab] Monaco editor collaboration listener set up');
-  }
-
-  // Initialize collaboration UI handlers
-  function initCollaboration() {
-    // Ensure DOM is fully loaded before querying elements
->>>>>>> b20941aa8d7343727d725c2d5f94d95e87f36c61
     if (document.readyState === 'loading') {
       document.addEventListener('DOMContentLoaded', initCollaboration);
       return;
@@ -1520,7 +1345,6 @@ function initApp() {
     const displayNameJoinInput = document.getElementById('collab-display-name-join');
     const roomIdInput = document.getElementById('collab-room-id');
 
-<<<<<<< HEAD
     if (!joinActionBtn) {
       console.error('[Collab] Join button not found.');
       return;
@@ -1537,54 +1361,15 @@ function initApp() {
       modalBackdrop.setAttribute('aria-hidden', 'true');
       displayNameStartInput.value = '';
       if (roomNameInput) roomNameInput.value = '';
-=======
-    // Verify critical elements exist
-    if (!joinActionBtn) {
-      console.error('[Collab] Join button not found. Modal may not be loaded yet.');
-      return;
-    }
-
-    // Show modal
-    function showModal(mode) {
-      modalBackdrop.classList.remove('collab-modal-hidden');
-      modalBackdrop.setAttribute('aria-hidden', 'false');
-      if (mode === 'join') {
-        switchToJoinMode();
-      } else {
-        switchToStartMode();
-      }
-    }
-
-    // Hide modal
-    function hideModal() {
-      modalBackdrop.classList.add('collab-modal-hidden');
-      modalBackdrop.setAttribute('aria-hidden', 'true');
-      // Reset form
-      displayNameStartInput.value = '';
-      roomNameInput.value = '';
->>>>>>> b20941aa8d7343727d725c2d5f94d95e87f36c61
       displayNameJoinInput.value = '';
       roomIdInput.value = '';
     }
 
-<<<<<<< HEAD
     function switchToStartMode() {
       modeTabs.forEach(tab => {
         const active = tab.dataset.mode === 'start';
         tab.classList.toggle('collab-mode-tab-active', active);
         tab.setAttribute('aria-selected', String(active));
-=======
-    // Switch to "Start" mode
-    function switchToStartMode() {
-      modeTabs.forEach(tab => {
-        if (tab.dataset.mode === 'start') {
-          tab.classList.add('collab-mode-tab-active');
-          tab.setAttribute('aria-selected', 'true');
-        } else {
-          tab.classList.remove('collab-mode-tab-active');
-          tab.setAttribute('aria-selected', 'false');
-        }
->>>>>>> b20941aa8d7343727d725c2d5f94d95e87f36c61
       });
       startSection.style.display = 'flex';
       joinSection.style.display = 'none';
@@ -1592,24 +1377,11 @@ function initApp() {
       joinActionBtn.style.display = 'none';
     }
 
-<<<<<<< HEAD
     function switchToJoinMode() {
       modeTabs.forEach(tab => {
         const active = tab.dataset.mode === 'join';
         tab.classList.toggle('collab-mode-tab-active', active);
         tab.setAttribute('aria-selected', String(active));
-=======
-    // Switch to "Join" mode
-    function switchToJoinMode() {
-      modeTabs.forEach(tab => {
-        if (tab.dataset.mode === 'join') {
-          tab.classList.add('collab-mode-tab-active');
-          tab.setAttribute('aria-selected', 'true');
-        } else {
-          tab.classList.remove('collab-mode-tab-active');
-          tab.setAttribute('aria-selected', 'false');
-        }
->>>>>>> b20941aa8d7343727d725c2d5f94d95e87f36c61
       });
       startSection.style.display = 'none';
       joinSection.style.display = 'flex';
@@ -1617,7 +1389,6 @@ function initApp() {
       joinActionBtn.style.display = 'inline-block';
     }
 
-<<<<<<< HEAD
     function onStartCollaboration() {
       const displayName = displayNameStartInput.value.trim();
       if (!displayName) { showStatus('Please enter a display name', true); return; }
@@ -1635,78 +1406,10 @@ function initApp() {
       joinCollaborationSession(displayName, roomId);
     }
 
-=======
-    // Start collaboration
-    function startCollaboration() {
-      const displayName = displayNameStartInput.value.trim();
-      if (!displayName) {
-        showStatus('Please enter a display name', true);
-        return;
-      }
-
-      const roomId = generateRoomId();
-      collabState.isActive = true;
-      collabState.role = 'host';
-      collabState.roomId = roomId;
-      collabState.displayName = displayName;
-
-      updateCollabStatus();
-      updateEditorReadOnly();
-      hideModal();
-      
-      // Connect to WebSocket server
-      connectWebSocket();
-      
-      // Setup Monaco collaboration if editor is ready
-      setupMonacoCollaboration();
-      
-      showStatus(`Collaboration started! Room ID: ${roomId}`, false);
-    }
-
-    // Join room
-    function joinRoom() {
-      console.log('[Collab] joinRoom() called - Join button clicked');
-      const displayName = displayNameJoinInput.value.trim();
-      const roomId = roomIdInput.value.trim().toUpperCase();
-
-      if (!displayName) {
-        showStatus('Please enter a display name', true);
-        return;
-      }
-      if (!roomId) {
-        showStatus('Please enter a room ID', true);
-        return;
-      }
-      if (roomId.length !== 8) {
-        showStatus('Room ID must be 8 characters', true);
-        return;
-      }
-
-      collabState.isActive = true;
-      collabState.role = 'guest';
-      collabState.roomId = roomId;
-      collabState.displayName = displayName;
-
-      updateCollabStatus();
-      updateEditorReadOnly();
-      hideModal();
-      
-      // Connect to WebSocket server
-      connectWebSocket();
-      
-      // Setup Monaco collaboration if editor is ready
-      setupMonacoCollaboration();
-      
-      showStatus(`Joining room ${roomId}...`, false);
-    }
-
-    // Event listeners
->>>>>>> b20941aa8d7343727d725c2d5f94d95e87f36c61
     startCollabBtn?.addEventListener('click', () => showModal('start'));
     joinRoomBtn?.addEventListener('click', () => showModal('join'));
     modalCloseBtn?.addEventListener('click', hideModal);
     cancelBtn?.addEventListener('click', hideModal);
-<<<<<<< HEAD
     modalBackdrop?.addEventListener('click', e => { if (e.target === modalBackdrop) hideModal(); });
 
     modeTabs.forEach(tab => {
@@ -1738,6 +1441,179 @@ function initApp() {
     });
   }
 
+  // ─── Toolbar Button Wiring ─────────────────────────────────────────────────
+
+  function wireToolbar() {
+    const tbOpenFolder  = document.getElementById('tb-open-folder');
+    const tbOpenFile    = document.getElementById('tb-open-file');
+    const tbSave        = document.getElementById('tb-save');
+    const tbNewFile     = document.getElementById('tb-new-file');
+    const tbRun         = document.getElementById('tb-run');
+    const tbCollabStart = document.getElementById('tb-collab-start');
+    const tbCollabJoin  = document.getElementById('tb-collab-join');
+    const tbCollabEnd   = document.getElementById('tb-collab-end');
+    const tbToggleTerm  = document.getElementById('tb-toggle-terminal');
+    const tbToggleSide  = document.getElementById('tb-toggle-sidebar');
+
+    // Sidebar header shortcuts
+    const sbOpenFolder = document.getElementById('sb-open-folder');
+    if (sbOpenFolder) sbOpenFolder.addEventListener('click', async () => {
+      const tree = await window.editorAPI.openFolder();
+      if (!tree) return;
+      currentFolderRoot = tree.path;
+      setExplorerTreeFromBackendTree(tree);
+      renderRecentProjects(await window.editorAPI.getRecentProjects());
+    });
+
+    const sbNewFile = document.getElementById('sb-new-file');
+    if (sbNewFile) sbNewFile.addEventListener('click', () => tbNewFile && tbNewFile.click());
+
+    const sbCollapseAll = document.getElementById('sb-collapse-all');
+    if (sbCollapseAll) sbCollapseAll.addEventListener('click', () => {
+      function collapseAll(node) {
+        if (!node) return;
+        if (node.type === 'folder') { node.expanded = false; (node.children || []).forEach(collapseAll); }
+      }
+      if (explorerTreeRoot) { (explorerTreeRoot.children || []).forEach(collapseAll); renderTree(explorerTreeRoot); }
+    });
+
+    if (tbOpenFolder) tbOpenFolder.addEventListener('click', async () => {
+      const tree = await window.editorAPI.openFolder();
+      if (!tree) return;
+      currentFolderRoot = tree.path;
+      setExplorerTreeFromBackendTree(tree);
+      renderRecentProjects(await window.editorAPI.getRecentProjects());
+    });
+
+    if (tbOpenFile) tbOpenFile.addEventListener('click', async () => {
+      const result = await window.editorAPI.openFile();
+      if (!result) return;
+      clearAllInlineComments();
+      setEditorContent(result.content, getLanguageFromPath(result.filePath));
+      const fileName = result.filePath.replace(/^.*[/\\]/, '');
+      currentTab.textContent = fileName;
+      currentTab.dataset.filePath = result.filePath;
+      setActiveFile(result.filePath);
+    });
+
+    if (tbSave) tbSave.addEventListener('click', performSave);
+
+    if (tbNewFile) tbNewFile.addEventListener('click', async () => {
+      if (!currentFolderRoot) { showStatus('Open a folder first', true); return; }
+      const fileName = window.prompt('File name (e.g. script.js):', 'untitled.js');
+      if (!fileName) return;
+      const trimmed = fileName.trim();
+      if (!trimmed) { showStatus('File name cannot be empty', true); return; }
+      const result = await window.editorAPI.createFile(currentFolderRoot, trimmed);
+      if (result.error) { showStatus(result.error, true); return; }
+      const tree = await window.editorAPI.getFolderTree(currentFolderRoot);
+      if (tree) setExplorerTreeFromBackendTree(tree);
+      const openResult = await window.editorAPI.readFile(result.filePath);
+      if (openResult.error) { showStatus('Created but could not open: ' + openResult.error, true); return; }
+      clearAllInlineComments();
+      setEditorContent(openResult.content, getLanguageFromPath(result.filePath));
+      currentTab.textContent = trimmed;
+      currentTab.dataset.filePath = result.filePath;
+      setActiveFile(result.filePath);
+      showStatus('Created ' + trimmed);
+    });
+
+    if (tbRun) tbRun.addEventListener('click', async () => {
+      const filePath = currentTab.dataset.filePath;
+      if (!filePath) { showStatus('No file open to run', true); return; }
+      const ext = filePath.split('.').pop().toLowerCase();
+      if (!['js', 'py'].includes(ext)) { showStatus('Supported: .js, .py only', true); return; }
+      const saveResult = await window.editorAPI.saveFile(filePath, getEditorContent());
+      if (!saveResult.success) { showStatus('Save failed before run', true); return; }
+      const runResult = await window.editorAPI.runCurrentFile(filePath);
+      if (runResult.error) { showStatus(runResult.error, true); return; }
+      showStatus('Running ' + currentTab.textContent);
+      // Flash run button
+      tbRun.classList.add('toolbar-btn--running');
+      setTimeout(() => tbRun.classList.remove('toolbar-btn--running'), 800);
+    });
+
+    // Collab start — opens the modal in Start mode
+    if (tbCollabStart) tbCollabStart.addEventListener('click', () => {
+      const backdrop = document.querySelector('.collab-modal-backdrop');
+      const startSection = document.querySelector('.collab-form-section-start');
+      const joinSection  = document.querySelector('.collab-form-section-join');
+      const startBtn = document.querySelector('.collab-primary-action[data-action="start"]');
+      const joinBtn  = document.querySelector('.collab-primary-action-join');
+      const tabs = document.querySelectorAll('.collab-mode-tab');
+      if (!backdrop) return;
+      backdrop.classList.remove('collab-modal-hidden');
+      backdrop.setAttribute('aria-hidden', 'false');
+      tabs.forEach(t => {
+        const active = t.dataset.mode === 'start';
+        t.classList.toggle('collab-mode-tab-active', active);
+        t.setAttribute('aria-selected', String(active));
+      });
+      startSection.style.display = 'flex';
+      joinSection.style.display  = 'none';
+      startBtn.style.display     = 'inline-block';
+      joinBtn.style.display      = 'none';
+    });
+
+    // Collab join — opens the modal in Join mode
+    if (tbCollabJoin) tbCollabJoin.addEventListener('click', () => {
+      const backdrop = document.querySelector('.collab-modal-backdrop');
+      const startSection = document.querySelector('.collab-form-section-start');
+      const joinSection  = document.querySelector('.collab-form-section-join');
+      const startBtn = document.querySelector('.collab-primary-action[data-action="start"]');
+      const joinBtn  = document.querySelector('.collab-primary-action-join');
+      const tabs = document.querySelectorAll('.collab-mode-tab');
+      if (!backdrop) return;
+      backdrop.classList.remove('collab-modal-hidden');
+      backdrop.setAttribute('aria-hidden', 'false');
+      tabs.forEach(t => {
+        const active = t.dataset.mode === 'join';
+        t.classList.toggle('collab-mode-tab-active', active);
+        t.setAttribute('aria-selected', String(active));
+      });
+      startSection.style.display = 'none';
+      joinSection.style.display  = 'flex';
+      startBtn.style.display     = 'none';
+      joinBtn.style.display      = 'inline-block';
+    });
+
+    // End session button
+    if (tbCollabEnd) tbCollabEnd.addEventListener('click', () => {
+      if (confirm('End collaboration session?')) endCollaboration(false);
+    });
+
+    // Toggle Terminal
+    if (tbToggleTerm) tbToggleTerm.addEventListener('click', () => {
+      toggleTerminalVisibility();
+      tbToggleTerm.classList.toggle('active', isTerminalVisible);
+    });
+
+    // Toggle Sidebar
+    if (tbToggleSide) tbToggleSide.addEventListener('click', () => {
+      toggleExplorerVisibility();
+      tbToggleSide.classList.toggle('active', isExplorerVisible);
+    });
+
+    // Show/hide End Session button based on collab state
+    const origNotify = notifyCollabStateChange;
+    window._updateToolbarCollabState = function(isActive) {
+      if (tbCollabStart) tbCollabStart.hidden = isActive;
+      if (tbCollabJoin)  tbCollabJoin.hidden  = isActive;
+      if (tbCollabEnd)   tbCollabEnd.hidden   = !isActive;
+    };
+  }
+
+  wireToolbar();
+
+  // Hook into collab state changes to update toolbar
+  const _origNotify = notifyCollabStateChange;
+  function notifyCollabStateChange() {
+    _origNotify && _origNotify();
+    if (window._updateToolbarCollabState) {
+      window._updateToolbarCollabState(collabState.isActive);
+    }
+  }
+
   // ─── File Tree & Editor Plumbing (unchanged from original) ─────────────────
 
   let currentFolderRoot = null;
@@ -1767,61 +1643,6 @@ function initApp() {
     explorerTreeRoot = buildExplorerNode(backendRoot, true);
     renderTree(explorerTreeRoot);
   }
-=======
-    
-    // Close modal on backdrop click
-    modalBackdrop?.addEventListener('click', function(e) {
-      if (e.target === modalBackdrop) {
-        hideModal();
-      }
-    });
-
-    // Mode tab switching
-    modeTabs.forEach(tab => {
-      tab.addEventListener('click', function() {
-        if (tab.dataset.mode === 'start') {
-          switchToStartMode();
-        } else {
-          switchToJoinMode();
-        }
-      });
-    });
-
-    // Form submission
-    startActionBtn?.addEventListener('click', startCollaboration);
-    joinActionBtn?.addEventListener('click', joinRoom);
-
-    // Enter key to submit
-    [displayNameStartInput, roomNameInput, displayNameJoinInput, roomIdInput].forEach(input => {
-      if (input) {
-        input.addEventListener('keydown', function(e) {
-          if (e.key === 'Enter') {
-            if (startSection.style.display !== 'none') {
-              startActionBtn.click();
-            } else {
-              joinActionBtn.click();
-            }
-          }
-        });
-      }
-    });
-  }
-
-  // Initialize collaboration handlers
-  initCollaboration();
-
-  // Setup Monaco collaboration when editor is ready
-  if (window.monacoEditor) {
-    setupMonacoCollaboration();
-  } else {
-    // Wait for Monaco to be ready
-    window.addEventListener('monaco-ready', function() {
-      setupMonacoCollaboration();
-    });
-  }
-
-  let currentFolderRoot = null;
->>>>>>> b20941aa8d7343727d725c2d5f94d95e87f36c61
 
   function renderRecentProjects(paths) {
     recentProjectsList.innerHTML = '';
@@ -1832,22 +1653,14 @@ function initApp() {
       recentProjectsList.appendChild(empty);
       return;
     }
-<<<<<<< HEAD
     paths.forEach(folderPath => {
-=======
-    paths.forEach(function (folderPath) {
->>>>>>> b20941aa8d7343727d725c2d5f94d95e87f36c61
       const name = folderPath.replace(/^.*[/\\]/, '') || folderPath;
       const el = document.createElement('div');
       el.className = 'recent-project-item';
       el.dataset.path = folderPath;
       el.textContent = name;
       el.title = folderPath;
-<<<<<<< HEAD
       el.addEventListener('click', async () => {
-=======
-      el.addEventListener('click', async function () {
->>>>>>> b20941aa8d7343727d725c2d5f94d95e87f36c61
         const result = await window.editorAPI.openRecentProject(folderPath);
         if (result.error) {
           showStatus(result.error, true);
@@ -1855,11 +1668,7 @@ function initApp() {
           return;
         }
         currentFolderRoot = result.tree.path;
-<<<<<<< HEAD
         setExplorerTreeFromBackendTree(result.tree);
-=======
-        renderTree(result.tree);
->>>>>>> b20941aa8d7343727d725c2d5f94d95e87f36c61
         renderRecentProjects(await window.editorAPI.getRecentProjects());
       });
       recentProjectsList.appendChild(el);
@@ -1870,24 +1679,53 @@ function initApp() {
     statusMessage.textContent = text;
     statusMessage.className = 'status-item' + (isError ? ' status-error' : '');
     clearTimeout(showStatus._timer);
-<<<<<<< HEAD
     showStatus._timer = setTimeout(() => {
-=======
-    showStatus._timer = setTimeout(function () {
->>>>>>> b20941aa8d7343727d725c2d5f94d95e87f36c61
       statusMessage.textContent = '';
       statusMessage.className = 'status-item';
     }, 3000);
   }
 
   function setActiveFile(filePath) {
-<<<<<<< HEAD
     folderTree.querySelectorAll('.tree-file').forEach(el => {
-=======
-    folderTree.querySelectorAll('.tree-file').forEach(function (el) {
->>>>>>> b20941aa8d7343727d725c2d5f94d95e87f36c61
       el.classList.toggle('active', el.dataset.path === filePath);
     });
+  }
+
+  // ─── File icon helper ─────────────────────────────────────────────────────
+
+  function getFileIcon(name) {
+    const ext = (name.split('.').pop() || '').toLowerCase();
+    const base = name.toLowerCase();
+    // Special filenames
+    if (base === 'package.json' || base === 'package-lock.json') return { glyph: '📦', cls: 'file-icon-json' };
+    if (base === '.gitignore' || base === '.gitattributes') return { glyph: '⎇', cls: 'file-icon-git' };
+    if (base === 'readme.md' || base === 'readme') return { glyph: '📖', cls: 'file-icon-md' };
+    if (base === 'dockerfile') return { glyph: '🐳', cls: 'file-icon-cfg' };
+    // By extension — use inline SVGs for the common ones to stay crisp
+    const map = {
+      js:   { svg: `<svg width="13" height="13" viewBox="0 0 24 24"><rect x="2" y="2" width="20" height="20" rx="3" fill="#f7df1e"/><text x="5" y="17" font-size="11" font-weight="700" fill="#333" font-family="monospace">JS</text></svg>`, cls: 'file-icon-js' },
+      ts:   { svg: `<svg width="13" height="13" viewBox="0 0 24 24"><rect x="2" y="2" width="20" height="20" rx="3" fill="#3178c6"/><text x="4" y="17" font-size="11" font-weight="700" fill="#fff" font-family="monospace">TS</text></svg>`, cls: 'file-icon-ts' },
+      jsx:  { svg: `<svg width="13" height="13" viewBox="0 0 24 24"><rect x="2" y="2" width="20" height="20" rx="3" fill="#61dafb" fill-opacity=".2" stroke="#61dafb" stroke-width="1.5"/><text x="4" y="17" font-size="9" font-weight="700" fill="#61dafb" font-family="monospace">JSX</text></svg>`, cls: 'file-icon-js' },
+      tsx:  { svg: `<svg width="13" height="13" viewBox="0 0 24 24"><rect x="2" y="2" width="20" height="20" rx="3" fill="#3178c6" fill-opacity=".2" stroke="#3178c6" stroke-width="1.5"/><text x="3" y="17" font-size="9" font-weight="700" fill="#3178c6" font-family="monospace">TSX</text></svg>`, cls: 'file-icon-ts' },
+      html: { svg: `<svg width="13" height="13" viewBox="0 0 24 24"><rect x="2" y="2" width="20" height="20" rx="3" fill="#e34c26" fill-opacity=".15" stroke="#e34c26" stroke-width="1.5"/><text x="2" y="17" font-size="8" font-weight="700" fill="#e34c26" font-family="monospace">HTML</text></svg>`, cls: 'file-icon-html' },
+      css:  { svg: `<svg width="13" height="13" viewBox="0 0 24 24"><rect x="2" y="2" width="20" height="20" rx="3" fill="#264de4" fill-opacity=".15" stroke="#264de4" stroke-width="1.5"/><text x="3" y="17" font-size="9" font-weight="700" fill="#264de4" font-family="monospace">CSS</text></svg>`, cls: 'file-icon-css' },
+      json: { glyph: '{}', cls: 'file-icon-json' },
+      md:   { glyph: 'M↓', cls: 'file-icon-md' },
+      py:   { glyph: '🐍', cls: 'file-icon-py' },
+      png: { glyph: '🖼', cls: 'file-icon-img' },
+      jpg: { glyph: '🖼', cls: 'file-icon-img' },
+      svg: { glyph: '✦', cls: 'file-icon-img' },
+      lock: { glyph: '🔒', cls: 'file-icon-lock' },
+      env:  { glyph: '⚙', cls: 'file-icon-cfg' },
+    };
+    return map[ext] || { glyph: '·', cls: 'file-icon-default' };
+  }
+
+  function makeFolderIcon(expanded) {
+    const svg = expanded
+      ? `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#e3a23b" stroke-width="1.8"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>`
+      : `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#e3a23b" stroke-width="1.8"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z" fill="#e3a23b" fill-opacity="0.12"/></svg>`;
+    return svg;
   }
 
   function renderTreeNode(node, depth) {
@@ -1895,24 +1733,32 @@ function initApp() {
       const el = document.createElement('div');
       el.className = 'tree-file';
       el.dataset.path = node.path;
-<<<<<<< HEAD
-      el.style.paddingLeft = (12 + depth * 12) + 'px';
-      el.textContent = node.name;
+      el.style.paddingLeft = (8 + depth * 14) + 'px';
+
+      // Icon
+      const iconEl = document.createElement('span');
+      iconEl.className = 'tree-file-icon';
+      const iconInfo = getFileIcon(node.name);
+      if (iconInfo.svg) {
+        iconEl.innerHTML = iconInfo.svg;
+      } else {
+        iconEl.textContent = iconInfo.glyph;
+        iconEl.style.fontSize = '11px';
+      }
+      iconEl.classList.add(iconInfo.cls);
+
+      // Name
+      const nameEl = document.createElement('span');
+      nameEl.className = 'tree-file-name';
+      nameEl.textContent = node.name;
+
+      el.appendChild(iconEl);
+      el.appendChild(nameEl);
+
       el.addEventListener('click', async () => {
         const result = await window.editorAPI.readFile(node.path);
         if (result.error) { showStatus('Error: ' + result.error, true); return; }
-        // Clear inline comments from previous file before switching
         clearAllInlineComments();
-=======
-      el.textContent = node.name;
-      el.style.paddingLeft = (12 + depth * 12) + 'px';
-      el.addEventListener('click', async function () {
-        const result = await window.editorAPI.readFile(node.path);
-        if (result.error) {
-          showStatus('Error: ' + result.error, true);
-          return;
-        }
->>>>>>> b20941aa8d7343727d725c2d5f94d95e87f36c61
         setEditorContent(result.content, getLanguageFromPath(node.path));
         currentTab.textContent = node.name;
         currentTab.dataset.filePath = node.path;
@@ -1920,43 +1766,51 @@ function initApp() {
       });
       return el;
     }
+
+    // Folder
     const folder = document.createElement('div');
     folder.className = 'tree-folder';
+
     const label = document.createElement('div');
     label.className = 'tree-folder-label';
-    label.style.paddingLeft = (12 + depth * 12) + 'px';
-<<<<<<< HEAD
-    const icon = document.createElement('span');
-    icon.className = 'tree-folder-icon';
-    icon.textContent = node.expanded ? '\u25BE' : '\u25B8';
+    label.style.paddingLeft = (8 + depth * 14) + 'px';
+
+    // Arrow chevron
+    const arrow = document.createElement('span');
+    arrow.className = 'tree-folder-arrow' + (node.expanded ? ' open' : '');
+    arrow.innerHTML = `<svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><polyline points="9 18 15 12 9 6"/></svg>`;
+
+    // Folder icon
+    const folderIcon = document.createElement('span');
+    folderIcon.className = 'tree-folder-icon';
+    folderIcon.innerHTML = makeFolderIcon(node.expanded);
+
+    // Name
     const nameSpan = document.createElement('span');
     nameSpan.className = 'tree-folder-name';
     nameSpan.textContent = node.name;
-    label.appendChild(icon);
+
+    label.appendChild(arrow);
+    label.appendChild(folderIcon);
     label.appendChild(nameSpan);
-    label.addEventListener('click', () => { node.expanded = !node.expanded; renderTree(explorerTreeRoot); });
+
+    label.addEventListener('click', () => {
+      node.expanded = !node.expanded;
+      renderTree(explorerTreeRoot);
+    });
+
     folder.appendChild(label);
+
     const childrenContainer = document.createElement('div');
     childrenContainer.className = 'tree-children';
     childrenContainer.style.display = node.expanded ? '' : 'none';
     (node.children || []).forEach(child => childrenContainer.appendChild(renderTreeNode(child, depth + 1)));
     folder.appendChild(childrenContainer);
-=======
-    label.textContent = node.name;
-    folder.appendChild(label);
-    const children = document.createElement('div');
-    children.className = 'tree-children';
-    (node.children || []).forEach(function (child) {
-      children.appendChild(renderTreeNode(child, depth + 1));
-    });
-    folder.appendChild(children);
->>>>>>> b20941aa8d7343727d725c2d5f94d95e87f36c61
     return folder;
   }
 
   function renderTree(root) {
     folderTree.innerHTML = '';
-<<<<<<< HEAD
     if (!root) {
       folderTreeEmpty.hidden = false;
       folderTree.hidden = true;
@@ -1964,18 +1818,11 @@ function initApp() {
     }
     if (root.children && root.children.length) {
       root.children.forEach(child => folderTree.appendChild(renderTreeNode(child, 0)));
-=======
-    if (root.children && root.children.length) {
-      root.children.forEach(function (child) {
-        folderTree.appendChild(renderTreeNode(child, 0));
-      });
->>>>>>> b20941aa8d7343727d725c2d5f94d95e87f36c61
     }
     folderTreeEmpty.hidden = true;
     folderTree.hidden = false;
   }
 
-<<<<<<< HEAD
   const sidebarEl = document.querySelector('.sidebar');
   const terminalPanelEl = document.querySelector('.terminal-panel');
   let isExplorerVisible = true;
@@ -2036,79 +1883,6 @@ function initApp() {
       event.shiftKey ? performSaveAs() : performSave();
       return;
     }
-=======
-  openFileBtn.addEventListener('click', async function () {
-    const result = await window.editorAPI.openFile();
-    if (!result) return;
-    setEditorContent(result.content, getLanguageFromPath(result.filePath));
-    const fileName = result.filePath.replace(/^.*[/\\]/, '');
-    currentTab.textContent = fileName;
-    currentTab.dataset.filePath = result.filePath;
-    setActiveFile(result.filePath);
-  });
-
-  openFolderBtn.addEventListener('click', async function () {
-    const tree = await window.editorAPI.openFolder();
-    if (!tree) return;
-    currentFolderRoot = tree.path;
-    renderTree(tree);
-    renderRecentProjects(await window.editorAPI.getRecentProjects());
-  });
-
-  if (!newFileBtn) {
-    console.error('[initApp] newFileBtn not found - cannot attach listener');
-  }
-  newFileBtn?.addEventListener('click', async function () {
-    console.log('[NewFile] click fired, currentFolderRoot:', currentFolderRoot);
-    if (!currentFolderRoot) {
-      showStatus('Open a folder first', true);
-      return;
-    }
-    const fileName = window.prompt('File name (e.g. script.js):', 'untitled.js');
-    if (fileName === null) return;
-    const trimmed = fileName.trim();
-    if (!trimmed) {
-      showStatus('File name cannot be empty', true);
-      return;
-    }
-    if (trimmed.includes('/') || trimmed.includes('\\') || trimmed === '.' || trimmed === '..') {
-      showStatus('Invalid file name', true);
-      return;
-    }
-    console.log('[NewFile] calling createFile:', currentFolderRoot, trimmed);
-    const result = await window.editorAPI.createFile(currentFolderRoot, trimmed);
-    console.log('[NewFile] createFile result:', result);
-    if (result.error) {
-      showStatus(result.error, true);
-      return;
-    }
-    const tree = await window.editorAPI.getFolderTree(currentFolderRoot);
-    if (tree) renderTree(tree);
-    const openResult = await window.editorAPI.readFile(result.filePath);
-    if (openResult.error) {
-      showStatus('Created but could not open: ' + openResult.error, true);
-      return;
-    }
-    setEditorContent(openResult.content, getLanguageFromPath(result.filePath));
-    currentTab.textContent = trimmed;
-    currentTab.dataset.filePath = result.filePath;
-    setActiveFile(result.filePath);
-    showStatus('Created ' + trimmed);
-  });
-
-  saveBtn.addEventListener('click', async function () {
-    const filePath = currentTab.dataset.filePath;
-    if (!filePath) {
-      showStatus('No file open', true);
-      return;
-    }
-    const result = await window.editorAPI.saveFile(filePath, getEditorContent());
-    if (result.success) {
-      showStatus('Saved');
-    } else {
-      showStatus('Error: ' + (result.error || 'Save failed'), true);
-    }
->>>>>>> b20941aa8d7343727d725c2d5f94d95e87f36c61
   });
 
   (async function loadRecentProjects() {
@@ -2124,7 +1898,14 @@ function initApp() {
     span.textContent = data.chunk;
     terminalOutput.appendChild(span);
     terminalOutput.scrollTop = terminalOutput.scrollHeight;
+    // Light up terminal dot when there's output
+    const dot = document.getElementById('terminal-dot');
+    if (dot) { dot.classList.add('running'); clearTimeout(dot._timer); dot._timer = setTimeout(() => dot.classList.remove('running'), 1500); }
   });
+
+  // Terminal clear button
+  const terminalClearBtn = document.getElementById('terminal-clear-btn');
+  if (terminalClearBtn) terminalClearBtn.addEventListener('click', () => { terminalOutput.innerHTML = ''; });
 
   (async function initTerminal() {
     await window.editorAPI.startTerminal();
@@ -2144,7 +1925,6 @@ function initApp() {
     await window.editorAPI.writeTerminal(command);
   });
 
-<<<<<<< HEAD
   if (window.editorAPI && typeof window.editorAPI.onMenuCommand === 'function') {
     window.editorAPI.onMenuCommand(async function (command) {
       switch (command) {
@@ -2279,22 +2059,22 @@ function injectCollabStyles() {
   const style = document.createElement('style');
   style.id = 'collab-permission-styles';
   style.textContent = `
-    /* ── Participant Panel (VS Code / Cursor dark) ── */
+    /* ── Participant Panel ── */
     .collab-panel {
       position: fixed;
       right: 0;
       top: 0;
       bottom: 0;
       width: 320px;
-      background: #161b22;
-      border-left: 1px solid #21262d;
+      background: #1e1e2e;
+      border-left: 1px solid #3a3a5c;
       display: flex;
       flex-direction: column;
       z-index: 1000;
-      box-shadow: -4px 0 24px rgba(0,0,0,0.4);
-      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      box-shadow: -4px 0 24px rgba(0,0,0,0.5);
+      font-family: 'Segoe UI', sans-serif;
       font-size: 13px;
-      color: #e6edf3;
+      color: #cdd6f4;
       transition: transform 0.2s ease;
     }
     .collab-panel-hidden {
@@ -2306,15 +2086,15 @@ function injectCollabStyles() {
       align-items: center;
       justify-content: space-between;
       padding: 12px 14px;
-      background: #21262d;
-      border-bottom: 1px solid #21262d;
+      background: #181825;
+      border-bottom: 1px solid #3a3a5c;
       flex-shrink: 0;
     }
     .collab-panel-title {
-      font-weight: 600;
+      font-weight: 700;
       font-size: 13px;
-      letter-spacing: 0.03em;
-      color: #58a6ff;
+      letter-spacing: 0.04em;
+      color: #cba6f7;
     }
     .collab-panel-actions {
       display: flex;
@@ -2323,35 +2103,35 @@ function injectCollabStyles() {
     }
     .collab-panel-room-id {
       font-size: 11px;
-      background: #30363d;
-      border-radius: 6px;
-      padding: 3px 8px;
+      background: #313244;
+      border-radius: 4px;
+      padding: 2px 8px;
       cursor: pointer;
-      color: #58a6ff;
+      color: #89b4fa;
       white-space: nowrap;
       max-width: 160px;
       overflow: hidden;
       text-overflow: ellipsis;
     }
-    .collab-panel-room-id:hover { background: #484f58; }
+    .collab-panel-room-id:hover { background: #45475a; }
     .collab-panel-close {
       background: none;
       border: none;
-      color: #8b949e;
+      color: #6c7086;
       font-size: 16px;
       cursor: pointer;
       padding: 2px 6px;
       border-radius: 4px;
       line-height: 1;
     }
-    .collab-panel-close:hover { background: #30363d; color: #f85149; }
+    .collab-panel-close:hover { background: #313244; color: #f38ba8; }
     .collab-panel-body {
       flex: 1;
       overflow-y: auto;
       padding: 10px 0;
     }
     .collab-panel-empty {
-      color: #8b949e;
+      color: #6c7086;
       text-align: center;
       margin-top: 32px;
       font-size: 12px;
@@ -2360,7 +2140,7 @@ function injectCollabStyles() {
     /* ── Participant Row ── */
     .collab-participant-row {
       padding: 10px 14px;
-      border-bottom: 1px solid #21262d;
+      border-bottom: 1px solid #313244;
       display: flex;
       flex-direction: column;
       gap: 6px;
@@ -2374,28 +2154,28 @@ function injectCollabStyles() {
     .collab-participant-name {
       flex: 1;
       font-weight: 500;
-      color: #e6edf3;
+      color: #cdd6f4;
       overflow: hidden;
       text-overflow: ellipsis;
       white-space: nowrap;
     }
     .collab-me-label {
-      color: #8b949e;
+      color: #6c7086;
       font-weight: 400;
       font-size: 11px;
     }
     .role-badge {
       font-size: 10px;
-      font-weight: 600;
+      font-weight: 700;
       border-radius: 4px;
       padding: 2px 7px;
       text-transform: uppercase;
       letter-spacing: 0.05em;
       flex-shrink: 0;
     }
-    .role-host   { background: rgba(56, 139, 253, 0.2); color: #58a6ff; }
-    .role-editor { background: rgba(63, 185, 80, 0.2); color: #3fb950; }
-    .role-viewer { background: #30363d; color: #8b949e; }
+    .role-host   { background: #cba6f7; color: #1e1e2e; }
+    .role-editor { background: #a6e3a1; color: #1e1e2e; }
+    .role-viewer { background: #45475a; color: #cdd6f4; }
 
     .collab-participant-controls {
       display: flex;
@@ -2405,15 +2185,15 @@ function injectCollabStyles() {
     .collab-ctrl-btn {
       font-size: 11px;
       padding: 3px 9px;
-      border-radius: 6px;
+      border-radius: 4px;
       border: none;
       cursor: pointer;
       font-weight: 500;
       transition: opacity 0.15s;
     }
-    .collab-ctrl-btn:hover { opacity: 0.9; }
-    .collab-ctrl-edit   { background: #58a6ff; color: #fff; }
-    .collab-ctrl-remove { background: #f85149; color: #fff; }
+    .collab-ctrl-btn:hover { opacity: 0.85; }
+    .collab-ctrl-edit   { background: #89b4fa; color: #1e1e2e; }
+    .collab-ctrl-remove { background: #f38ba8; color: #1e1e2e; }
 
     /* ── Join Request Toasts ── */
     .join-request-container {
@@ -2427,13 +2207,14 @@ function injectCollabStyles() {
       max-width: 340px;
     }
     .join-request-toast {
-      background: #161b22;
-      border: 1px solid #58a6ff;
+      background: #1e1e2e;
+      border: 1px solid #cba6f7;
       border-radius: 8px;
       padding: 12px 14px;
       box-shadow: 0 4px 20px rgba(0,0,0,0.5);
       animation: slideIn 0.2s ease;
-      color: #e6edf3;
+      color: #cdd6f4;
+      font-family: 'Segoe UI', sans-serif;
       font-size: 13px;
     }
     @keyframes slideIn {
@@ -2447,26 +2228,26 @@ function injectCollabStyles() {
       margin-bottom: 10px;
     }
     .join-request-icon { font-size: 18px; flex-shrink: 0; }
-    .join-request-time { font-size: 11px; color: #8b949e; margin-top: 2px; }
+    .join-request-time { font-size: 11px; color: #6c7086; margin-top: 2px; }
     .join-request-btns { display: flex; gap: 8px; }
     .join-approve-btn, .join-reject-btn {
       flex: 1;
-      padding: 6px 0;
+      padding: 5px 0;
       border: none;
-      border-radius: 6px;
+      border-radius: 5px;
       font-size: 12px;
       font-weight: 600;
       cursor: pointer;
       transition: opacity 0.15s;
     }
-    .join-approve-btn { background: #3fb950; color: #fff; }
-    .join-reject-btn  { background: #f85149; color: #fff; }
-    .join-approve-btn:hover, .join-reject-btn:hover { opacity: 0.9; }
+    .join-approve-btn { background: #a6e3a1; color: #1e1e2e; }
+    .join-reject-btn  { background: #f38ba8; color: #1e1e2e; }
+    .join-approve-btn:hover, .join-reject-btn:hover { opacity: 0.85; }
 
     /* ── Intruder Log ── */
     .collab-intruder-log {
-      border-top: 1px solid #f85149;
-      background: #1c1212;
+      border-top: 1px solid #f38ba8;
+      background: #1e1010;
       padding: 8px 14px;
       flex-shrink: 0;
       max-height: 180px;
@@ -2476,7 +2257,7 @@ function injectCollabStyles() {
     .collab-intruder-log-header {
       font-weight: 700;
       font-size: 11px;
-      color: #f85149;
+      color: #f38ba8;
       margin-bottom: 6px;
       letter-spacing: 0.05em;
       text-transform: uppercase;
@@ -2486,33 +2267,36 @@ function injectCollabStyles() {
       align-items: flex-start;
       gap: 6px;
       font-size: 11px;
-      color: #f85149;
+      color: #f38ba8;
       margin-bottom: 4px;
       line-height: 1.4;
     }
     .intruder-icon { flex-shrink: 0; }
     .intruder-time {
       display: block;
-      color: #8b949e;
+      color: #6c7086;
       font-size: 10px;
     }
 
-    /* ── Chat Box ── */
+    /* ════════════════════════════════════════════════
+       Chat Box
+    ════════════════════════════════════════════════ */
     .collab-chat {
       position: fixed;
-      bottom: 28px;
+      bottom: 28px; /* sit just above the status bar */
       right: 16px;
       width: 300px;
       max-height: 420px;
-      background: #161b22;
-      border: 1px solid #21262d;
-      border-radius: 8px;
-      box-shadow: 0 8px 32px rgba(0,0,0,0.5);
+      background: #1e1e2e;
+      border: 1px solid #3a3a5c;
+      border-radius: 10px;
+      box-shadow: 0 6px 28px rgba(0,0,0,0.55);
       display: flex;
       flex-direction: column;
       z-index: 1100;
+      font-family: 'Segoe UI', sans-serif;
       font-size: 13px;
-      color: #e6edf3;
+      color: #cdd6f4;
       transition: transform 0.2s ease, opacity 0.2s ease;
       overflow: hidden;
     }
@@ -2525,18 +2309,18 @@ function injectCollabStyles() {
       display: flex;
       align-items: center;
       justify-content: space-between;
-      padding: 10px 12px;
-      background: #21262d;
-      border-bottom: 1px solid #21262d;
+      padding: 9px 12px;
+      background: #181825;
+      border-bottom: 1px solid #313244;
       cursor: default;
       flex-shrink: 0;
       user-select: none;
     }
     .chat-title {
-      font-weight: 600;
+      font-weight: 700;
       font-size: 12px;
-      color: #58a6ff;
-      letter-spacing: 0.03em;
+      color: #89b4fa;
+      letter-spacing: 0.04em;
     }
     .chat-header-actions {
       display: flex;
@@ -2544,8 +2328,8 @@ function injectCollabStyles() {
       gap: 6px;
     }
     .chat-unread-badge {
-      background: #f85149;
-      color: #fff;
+      background: #f38ba8;
+      color: #1e1e2e;
       font-size: 10px;
       font-weight: 700;
       border-radius: 999px;
@@ -2556,7 +2340,7 @@ function injectCollabStyles() {
     .chat-toggle-btn, .chat-close-btn {
       background: none;
       border: none;
-      color: #8b949e;
+      color: #6c7086;
       cursor: pointer;
       font-size: 13px;
       padding: 2px 5px;
@@ -2564,8 +2348,8 @@ function injectCollabStyles() {
       line-height: 1;
     }
     .chat-toggle-btn:hover, .chat-close-btn:hover {
-      background: #30363d;
-      color: #e6edf3;
+      background: #313244;
+      color: #cdd6f4;
     }
     .chat-body {
       display: flex;
@@ -2599,32 +2383,30 @@ function injectCollabStyles() {
     }
     .chat-sender {
       font-size: 10px;
-      color: #58a6ff;
+      color: #89b4fa;
       font-weight: 600;
       margin-bottom: 1px;
     }
     .chat-text {
-      background: #21262d;
-      border-radius: 8px;
+      background: #313244;
+      border-radius: 10px;
       padding: 6px 10px;
       line-height: 1.45;
       word-break: break-word;
       white-space: pre-wrap;
       font-size: 12.5px;
-      border: 1px solid #30363d;
     }
     .chat-bubble-me .chat-text {
-      background: rgba(56, 139, 253, 0.2);
-      color: #e6edf3;
-      border-color: #58a6ff;
-      border-bottom-right-radius: 4px;
+      background: #4c7899;
+      color: #e0f0ff;
+      border-bottom-right-radius: 3px;
     }
     .chat-bubble-them .chat-text {
-      border-bottom-left-radius: 4px;
+      border-bottom-left-radius: 3px;
     }
     .chat-time {
       font-size: 10px;
-      color: #8b949e;
+      color: #45475a;
       margin-top: 1px;
     }
     .chat-input-row {
@@ -2632,15 +2414,15 @@ function injectCollabStyles() {
       align-items: flex-end;
       gap: 6px;
       padding: 8px 10px;
-      border-top: 1px solid #21262d;
+      border-top: 1px solid #313244;
       flex-shrink: 0;
     }
     .chat-input {
       flex: 1;
-      background: #0d1117;
-      border: 1px solid #30363d;
-      border-radius: 6px;
-      color: #e6edf3;
+      background: #313244;
+      border: 1px solid #45475a;
+      border-radius: 8px;
+      color: #cdd6f4;
       font-family: inherit;
       font-size: 12px;
       padding: 6px 10px;
@@ -2650,12 +2432,12 @@ function injectCollabStyles() {
       max-height: 100px;
       overflow-y: auto;
     }
-    .chat-input:focus { border-color: #58a6ff; }
+    .chat-input:focus { border-color: #89b4fa; }
     .chat-send-btn {
-      background: #58a6ff;
-      color: #fff;
+      background: #89b4fa;
+      color: #1e1e2e;
       border: none;
-      border-radius: 6px;
+      border-radius: 8px;
       width: 32px;
       height: 32px;
       cursor: pointer;
@@ -2666,20 +2448,23 @@ function injectCollabStyles() {
       flex-shrink: 0;
       transition: opacity 0.15s;
     }
-    .chat-send-btn:hover { opacity: 0.9; }
+    .chat-send-btn:hover { opacity: 0.85; }
 
-    /* ── Inline Comment Widgets ── */
+    /* ════════════════════════════════════════════════
+       Inline Comment Widgets
+    ════════════════════════════════════════════════ */
     .ic-widget {
+      font-family: 'Segoe UI', sans-serif;
       font-size: 12px;
-      color: #e6edf3;
+      color: #cdd6f4;
       background: transparent;
       padding: 2px 8px;
       box-sizing: border-box;
       width: 100%;
     }
     .ic-thread {
-      background: #161b22;
-      border: 1px solid #58a6ff;
+      background: #1e1e2e;
+      border: 1px solid #89b4fa;
       border-radius: 8px;
       overflow: hidden;
       box-shadow: 0 2px 12px rgba(0,0,0,0.4);
@@ -2687,36 +2472,36 @@ function injectCollabStyles() {
       transition: border-color 0.2s;
     }
     .ic-thread.ic-resolved {
-      border-color: #30363d;
-      opacity: 0.8;
+      border-color: #45475a;
+      opacity: 0.7;
     }
     .ic-thread-header {
       display: flex;
       align-items: center;
       gap: 8px;
       padding: 6px 10px;
-      background: #21262d;
-      border-bottom: 1px solid #21262d;
+      background: #181825;
+      border-bottom: 1px solid #313244;
       flex-wrap: wrap;
     }
     .ic-line-label {
       font-size: 10px;
-      background: #30363d;
-      border-radius: 4px;
-      padding: 2px 6px;
-      color: #58a6ff;
-      font-weight: 600;
+      background: #313244;
+      border-radius: 3px;
+      padding: 1px 6px;
+      color: #89b4fa;
+      font-weight: 700;
       flex-shrink: 0;
     }
     .ic-author {
       font-weight: 600;
       font-size: 11px;
-      color: #e6edf3;
+      color: #cba6f7;
       flex: 1;
     }
     .ic-time {
       font-size: 10px;
-      color: #8b949e;
+      color: #45475a;
     }
     .ic-thread-actions {
       display: flex;
@@ -2729,12 +2514,12 @@ function injectCollabStyles() {
       border: none;
       cursor: pointer;
       font-size: 11px;
-      color: #8b949e;
-      padding: 2px 6px;
-      border-radius: 4px;
+      color: #6c7086;
+      padding: 1px 5px;
+      border-radius: 3px;
     }
-    .ic-resolve-btn:hover { color: #3fb950; background: rgba(63, 185, 80, 0.15); }
-    .ic-collapse-btn:hover { color: #e6edf3; background: #30363d; }
+    .ic-resolve-btn:hover { color: #a6e3a1; background: #1e2b1e; }
+    .ic-collapse-btn:hover { color: #cdd6f4; background: #313244; }
     .ic-body {
       padding: 8px 10px;
       display: flex;
@@ -2742,7 +2527,7 @@ function injectCollabStyles() {
       gap: 6px;
     }
     .ic-root-text {
-      color: #e6edf3;
+      color: #cdd6f4;
       line-height: 1.5;
       white-space: pre-wrap;
       word-break: break-word;
@@ -2752,7 +2537,7 @@ function injectCollabStyles() {
       flex-direction: column;
       gap: 4px;
       padding-left: 8px;
-      border-left: 2px solid #30363d;
+      border-left: 2px solid #313244;
     }
     .ic-reply {
       display: flex;
@@ -2761,18 +2546,18 @@ function injectCollabStyles() {
     }
     .ic-reply-author {
       font-size: 10px;
-      font-weight: 600;
-      color: #58a6ff;
+      font-weight: 700;
+      color: #89b4fa;
     }
     .ic-reply-text {
       font-size: 12px;
-      color: #e6edf3;
+      color: #cdd6f4;
       white-space: pre-wrap;
       word-break: break-word;
     }
     .ic-reply-time {
       font-size: 10px;
-      color: #8b949e;
+      color: #45475a;
     }
     .ic-reply-row {
       display: flex;
@@ -2781,20 +2566,20 @@ function injectCollabStyles() {
     }
     .ic-reply-input {
       flex: 1;
-      background: #0d1117;
-      border: 1px solid #30363d;
+      background: #313244;
+      border: 1px solid #45475a;
       border-radius: 6px;
-      color: #e6edf3;
+      color: #cdd6f4;
       font-family: inherit;
       font-size: 11px;
       padding: 4px 8px;
       resize: none;
       outline: none;
     }
-    .ic-reply-input:focus { border-color: #58a6ff; }
+    .ic-reply-input:focus { border-color: #89b4fa; }
     .ic-reply-send-btn {
-      background: #58a6ff;
-      color: #fff;
+      background: #89b4fa;
+      color: #1e1e2e;
       border: none;
       border-radius: 6px;
       width: 26px;
@@ -2805,18 +2590,29 @@ function injectCollabStyles() {
     }
     .ic-resolved-label {
       font-size: 11px;
-      color: #3fb950;
+      color: #a6e3a1;
       font-weight: 600;
     }
-    .ic-prompt-widget {
-      width: 480px;
+    /* Inline comment prompt widget */
+    .ic-widget {
+      box-sizing: border-box;
+      overflow: hidden;
+      width: 100%;
+    }
+    /* Global prompt — floats in the editor's empty space area */
+    .ic-global-prompt {
+      position: absolute;
+      left: 50%;
+      transform: translateX(-50%);
+      bottom: 32px;
+      width: 520px;
       max-width: 90vw;
-      padding: 4px 0;
-      z-index: 100;
+      z-index: 150;
+      pointer-events: auto;
     }
     .ic-prompt-inner {
-      background: #161b22;
-      border: 1px solid #58a6ff;
+      background: #1e1e2e;
+      border: 1px dashed #cba6f7;
       border-radius: 8px;
       padding: 8px 10px;
       display: flex;
@@ -2824,10 +2620,10 @@ function injectCollabStyles() {
       gap: 6px;
     }
     .ic-prompt-input {
-      background: #0d1117;
-      border: 1px solid #30363d;
+      background: #313244;
+      border: 1px solid #45475a;
       border-radius: 6px;
-      color: #e6edf3;
+      color: #cdd6f4;
       font-family: inherit;
       font-size: 12px;
       padding: 5px 8px;
@@ -2837,29 +2633,30 @@ function injectCollabStyles() {
       box-sizing: border-box;
       cursor: text !important;
     }
-    .ic-prompt-input:focus { border-color: #58a6ff; }
+    .ic-prompt-input:focus { border-color: #cba6f7; }
     .ic-prompt-btns { display: flex; gap: 6px; }
     .ic-prompt-submit {
-      background: #58a6ff;
-      color: #fff;
+      background: #cba6f7;
+      color: #1e1e2e;
       border: none;
-      border-radius: 6px;
-      padding: 5px 12px;
+      border-radius: 5px;
+      padding: 4px 12px;
       font-size: 11px;
-      font-weight: 600;
+      font-weight: 700;
       cursor: pointer !important;
     }
     .ic-prompt-cancel {
-      background: #30363d;
-      color: #e6edf3;
+      background: #45475a;
+      color: #cdd6f4;
       border: none;
-      border-radius: 6px;
-      padding: 5px 10px;
+      border-radius: 5px;
+      padding: 4px 10px;
       font-size: 11px;
       cursor: pointer !important;
     }
+    /* Gutter icon shown in the Monaco line number margin */
     .ic-gutter-icon {
-      background: #58a6ff;
+      background: #cba6f7;
       width: 6px !important;
       border-radius: 3px;
       cursor: pointer;
@@ -2870,76 +2667,11 @@ function injectCollabStyles() {
 
 // ─── Bootstrap ────────────────────────────────────────────────────────────────
 
-=======
-  runBtn.addEventListener('click', async function () {
-    const filePath = currentTab.dataset.filePath;
-    if (!filePath) {
-      showStatus('No file open', true);
-      return;
-    }
-    const dotIdx = filePath.lastIndexOf('.');
-    const ext = dotIdx >= 0 ? filePath.substring(dotIdx).toLowerCase() : '(no extension)';
-    if (!['.js', '.py'].includes(ext)) {
-      showStatus('Unsupported file type. Supported: .js, .py', true);
-      return;
-    }
-    // Save before running so we execute latest content
-    const saveResult = await window.editorAPI.saveFile(filePath, getEditorContent());
-    if (!saveResult.success) {
-      showStatus('Save failed: ' + (saveResult.error || 'Unknown error'), true);
-      return;
-    }
-    const result = await window.editorAPI.runCurrentFile(filePath);
-    if (result.error) {
-      showStatus(result.error, true);
-      return;
-    }
-    showStatus('Running ' + currentTab.textContent);
-  });
-
-  saveAsBtn.addEventListener('click', async function () {
-    const result = await window.editorAPI.saveFileAs(getEditorContent());
-    if (result.cancelled) return;
-    if (result.error) {
-      showStatus('Error: ' + result.error, true);
-      return;
-    }
-    const fileName = result.filePath.replace(/^.*[/\\]/, '');
-    currentTab.dataset.filePath = result.filePath;
-    currentTab.textContent = fileName;
-    setActiveFile(result.filePath);
-    showStatus('Saved as ' + fileName);
-  });
-
-  document.addEventListener('keydown', function (event) {
-    if (event.target.id === 'terminal-input') return;
-    if (!event.ctrlKey) return;
-    if (event.key === 's') {
-      event.preventDefault();
-      if (event.shiftKey) {
-        saveAsBtn.click();
-      } else {
-        saveBtn.click();
-      }
-      return;
-    }
-    if (event.key === 'o') {
-      event.preventDefault();
-      openFileBtn.click();
-    }
-  });
-}
-
->>>>>>> b20941aa8d7343727d725c2d5f94d95e87f36c61
 if (document.readyState === 'loading') {
   document.addEventListener('DOMContentLoaded', function () {
     if (window.monacoEditor) {
       initApp();
     } else {
-<<<<<<< HEAD
-=======
-      console.log('[app] waiting for monaco-ready');
->>>>>>> b20941aa8d7343727d725c2d5f94d95e87f36c61
       window.addEventListener('monaco-ready', initApp);
     }
   });
@@ -2947,13 +2679,6 @@ if (document.readyState === 'loading') {
   if (window.monacoEditor) {
     initApp();
   } else {
-<<<<<<< HEAD
     window.addEventListener('monaco-ready', initApp);
   }
 }
-=======
-    console.log('[app] waiting for monaco-ready (DOM already loaded)');
-    window.addEventListener('monaco-ready', initApp);
-  }
-}
->>>>>>> b20941aa8d7343727d725c2d5f94d95e87f36c61
