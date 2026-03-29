@@ -204,21 +204,51 @@
   </div>
 
   <!-- Bottom terminal panel -->
-  <section class="terminal-panel">
+  <section class="terminal-panel" id="terminal-panel">
+
+    <!-- Resize handle -->
+    <div class="terminal-resize-handle" id="terminal-resize-handle"></div>
+
+    <!-- Header: tabs + actions -->
     <div class="terminal-header">
-      <div class="terminal-header-title">
-        <span class="terminal-header-dot" id="terminal-dot"></span>
-        Terminal
+      <div class="terminal-tabs">
+        <button class="terminal-tab terminal-tab--active" id="terminal-tab-1">
+          <span class="terminal-tab-dot" id="terminal-dot"></span>
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><polyline points="4 17 10 11 4 5"/><line x1="12" y1="19" x2="20" y2="19"/></svg>
+          bash
+        </button>
       </div>
       <div class="terminal-header-actions">
-        <button class="terminal-header-btn" id="terminal-clear-btn" title="Clear terminal">✕</button>
+        <button class="terminal-hbtn" id="terminal-clear-btn" title="Clear (Ctrl+L)">
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M3 6h18M8 6V4h8v2M19 6l-1 14H6L5 6"/></svg>
+        </button>
+        <button class="terminal-hbtn" id="terminal-kill-btn" title="Kill Process (Ctrl+C)">
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><circle cx="12" cy="12" r="9"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/></svg>
+        </button>
+        <div class="terminal-hbtn-divider"></div>
+        <button class="terminal-hbtn terminal-hbtn--close" id="tb-toggle-terminal-2" title="Hide Terminal">
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><polyline points="18 15 12 9 6 15"/></svg>
+        </button>
       </div>
     </div>
-    <div class="terminal-output" id="terminal-output"></div>
-    <div class="terminal-input-row">
-      <span class="terminal-prompt">&gt;</span>
-      <input type="text" class="terminal-input" id="terminal-input" spellcheck="false" autocomplete="off" />
+
+    <!-- Output area -->
+    <div class="terminal-output" id="terminal-output">
+      <div class="terminal-welcome">
+        <span class="terminal-welcome-line">CollabCode Terminal — type a command to begin</span>
+      </div>
     </div>
+
+    <!-- Input row -->
+    <div class="terminal-input-row" id="terminal-input-row">
+      <span class="terminal-prompt">
+        <span class="terminal-prompt-cwd" id="terminal-prompt-cwd">~</span>
+        <span class="terminal-prompt-arrow">❯</span>
+      </span>
+      <input type="text" class="terminal-input" id="terminal-input"
+        spellcheck="false" autocomplete="off" placeholder="Enter command…" />
+    </div>
+
   </section>
 
   <!-- Bottom status bar -->
