@@ -1890,40 +1890,157 @@ function initApp() {
   })();
 
   const terminalOutput = document.getElementById('terminal-output');
-  const terminalInput = document.getElementById('terminal-input');
+  const terminalInput  = document.getElementById('terminal-input');
+  const terminalDot    = document.getElementById('terminal-dot');
 
-  window.editorAPI.onTerminalOutput(function (data) {
-    const span = document.createElement('span');
-    if (data.type === 'stderr') span.className = 'terminal-stderr';
-    span.textContent = data.chunk;
-    terminalOutput.appendChild(span);
+  // ── Command history ──────────────────────────────────────────────────────
+  const cmdHistory = [];
+  let historyIndex = -1;
+
+  function termNow() {
+    return new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+  }
+
+  function flashDot(cls) {
+    if (!terminalDot) return;
+    terminalDot.classList.remove('running', 'error');
+    terminalDot.classList.add(cls);
+    clearTimeout(terminalDot._timer);
+    terminalDot._timer = setTimeout(() => terminalDot.classList.remove(cls), 1800);
+  }
+
+  // Append a styled line to the output
+  function appendTermLine(content, type = 'stdout', timestamp = true) {
+    const line = document.createElement('div');
+    line.className = 'terminal-line terminal-line-' + type;
+    line.innerHTML = content;
+    if (timestamp) {
+      const ts = document.createElement('span');
+      ts.className = 'terminal-ts';
+      ts.textContent = termNow();
+      line.appendChild(ts);
+    }
+    terminalOutput.appendChild(line);
     terminalOutput.scrollTop = terminalOutput.scrollHeight;
-    // Light up terminal dot when there's output
-    const dot = document.getElementById('terminal-dot');
-    if (dot) { dot.classList.add('running'); clearTimeout(dot._timer); dot._timer = setTimeout(() => dot.classList.remove('running'), 1500); }
+  }
+
+  // Echo the command the user typed
+  function echoCommand(cmd) {
+    const cwd = document.getElementById('terminal-prompt-cwd')?.textContent || '~';
+    appendTermLine(
+      `<span class="tl-prompt-path">${cwd}</span><span class="tl-prompt-arrow">❯</span><span class="tl-cmd-text">${cmd.replace(/</g,'&lt;').replace(/>/g,'&gt;')}</span>`,
+      'cmd', true
+    );
+  }
+
+  // Receive output from the backend process
+  window.editorAPI.onTerminalOutput(function (data) {
+    const isErr = data.type === 'stderr';
+    const text = (data.chunk || '').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+    if (!text.trim()) return;
+
+    if (isErr) {
+      appendTermLine(`<span class="tl-err-prefix">err</span>${text}`, 'stderr', false);
+      flashDot('error');
+    } else {
+      // Detect "success" lines (exit 0 messages, Done, etc.)
+      const isSuccess = /✓|done|success|compiled|started|listening/i.test(text);
+      appendTermLine(text, isSuccess ? 'success' : 'stdout', false);
+      flashDot('running');
+    }
   });
 
-  // Terminal clear button
-  const terminalClearBtn = document.getElementById('terminal-clear-btn');
-  if (terminalClearBtn) terminalClearBtn.addEventListener('click', () => { terminalOutput.innerHTML = ''; });
+  // ── Clear button ─────────────────────────────────────────────────────────
+  document.getElementById('terminal-clear-btn')?.addEventListener('click', () => {
+    terminalOutput.innerHTML = '<div class="terminal-welcome"><span class="terminal-welcome-line">Terminal cleared</span></div>';
+  });
 
+  // ── Kill button ──────────────────────────────────────────────────────────
+  document.getElementById('terminal-kill-btn')?.addEventListener('click', async () => {
+    await window.editorAPI.killTerminal();
+    appendTermLine('<span style="color:#f87171">Process killed (Ctrl+C)</span>', 'stderr', true);
+  });
+
+  // ── Collapse from header close button ────────────────────────────────────
+  document.getElementById('tb-toggle-terminal-2')?.addEventListener('click', () => {
+    toggleTerminalVisibility();
+    const tbToggleTerm = document.getElementById('tb-toggle-terminal');
+    if (tbToggleTerm) tbToggleTerm.classList.toggle('active', isTerminalVisible);
+  });
+
+  // ── Start terminal ───────────────────────────────────────────────────────
   (async function initTerminal() {
     await window.editorAPI.startTerminal();
+    appendTermLine('Terminal ready', 'info', true);
   })();
 
+  // ── Input: Enter to run, ↑↓ for history, Ctrl+C to kill ─────────────────
   terminalInput.addEventListener('keydown', async function (event) {
     if (event.ctrlKey && event.key === 'c') {
       event.preventDefault();
       await window.editorAPI.killTerminal();
+      appendTermLine('<span style="color:#f87171">^C</span>', 'stderr', false);
+      return;
+    }
+    if (event.ctrlKey && event.key === 'l') {
+      event.preventDefault();
+      document.getElementById('terminal-clear-btn')?.click();
+      return;
+    }
+    if (event.key === 'ArrowUp') {
+      event.preventDefault();
+      if (cmdHistory.length === 0) return;
+      historyIndex = Math.min(historyIndex + 1, cmdHistory.length - 1);
+      terminalInput.value = cmdHistory[cmdHistory.length - 1 - historyIndex];
+      return;
+    }
+    if (event.key === 'ArrowDown') {
+      event.preventDefault();
+      historyIndex = Math.max(historyIndex - 1, -1);
+      terminalInput.value = historyIndex === -1 ? '' : cmdHistory[cmdHistory.length - 1 - historyIndex];
       return;
     }
     if (event.key !== 'Enter') return;
     event.preventDefault();
     const command = terminalInput.value.trim();
     terminalInput.value = '';
+    historyIndex = -1;
     if (!command) return;
+    // Add to history (avoid duplicates at top)
+    if (cmdHistory[cmdHistory.length - 1] !== command) cmdHistory.push(command);
+    if (cmdHistory.length > 100) cmdHistory.shift();
+    echoCommand(command);
     await window.editorAPI.writeTerminal(command);
   });
+
+  // ── Terminal resize handle ────────────────────────────────────────────────
+  (function() {
+    const handle = document.getElementById('terminal-resize-handle');
+    const panel  = document.getElementById('terminal-panel');
+    if (!handle || !panel) return;
+    let startY = 0, startH = 0;
+    handle.addEventListener('mousedown', e => {
+      startY = e.clientY;
+      startH = panel.offsetHeight;
+      handle.classList.add('dragging');
+      document.body.style.cursor = 'ns-resize';
+      document.body.style.userSelect = 'none';
+      const onMove = ev => {
+        const delta = startY - ev.clientY;
+        const newH = Math.min(Math.max(startH + delta, 80), window.innerHeight * 0.6);
+        panel.style.height = newH + 'px';
+      };
+      const onUp = () => {
+        handle.classList.remove('dragging');
+        document.body.style.cursor = '';
+        document.body.style.userSelect = '';
+        document.removeEventListener('mousemove', onMove);
+        document.removeEventListener('mouseup', onUp);
+      };
+      document.addEventListener('mousemove', onMove);
+      document.addEventListener('mouseup', onUp);
+    });
+  })();
 
   if (window.editorAPI && typeof window.editorAPI.onMenuCommand === 'function') {
     window.editorAPI.onMenuCommand(async function (command) {
