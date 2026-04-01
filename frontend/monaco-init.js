@@ -27,8 +27,8 @@
     ].join('\n');
 
     window.monacoEditor = monaco.editor.create(container, {
-      value: initialContent,
-      language: 'javascript',
+      value: '',
+      language: 'plaintext',
       theme: 'vs-dark',
       automaticLayout: true,
       minimap: { enabled: true },

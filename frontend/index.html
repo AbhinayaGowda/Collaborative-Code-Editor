@@ -198,6 +198,66 @@
         <button type="button" id="nav-chat-btn" class="collab-nav-btn" hidden title="Toggle Chat">💬 Chat</button>
       </div>
       <div class="editor-area">
+        <!-- Welcome screen — shown until a file is opened -->
+        <div class="welcome-screen" id="welcome-screen">
+          <div class="welcome-inner">
+
+            <div class="welcome-logo">
+              <svg width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.4">
+                <polyline points="16 18 22 12 16 6"/>
+                <polyline points="8 6 2 12 8 18"/>
+              </svg>
+            </div>
+            <h1 class="welcome-title">CollabCode</h1>
+            <p class="welcome-subtitle">A collaborative code editor. Open a file or start a session.</p>
+
+            <div class="welcome-actions">
+              <button class="welcome-action-btn welcome-action-btn--primary" id="ws-open-folder">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>
+                Open Folder
+                <span class="welcome-action-kbd">Ctrl K</span>
+              </button>
+              <button class="welcome-action-btn" id="ws-open-file">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
+                Open File
+              </button>
+              <button class="welcome-action-btn welcome-action-btn--collab" id="ws-collab-start">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
+                Start Session
+              </button>
+              <button class="welcome-action-btn welcome-action-btn--join" id="ws-collab-join">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4"/><polyline points="10 17 15 12 10 7"/><line x1="15" y1="12" x2="3" y2="12"/></svg>
+                Join Room
+              </button>
+            </div>
+
+            <div class="welcome-recents" id="welcome-recents" hidden>
+              <p class="welcome-recents-label">Recent</p>
+              <div class="welcome-recents-list" id="welcome-recents-list"></div>
+            </div>
+
+            <div class="welcome-shortcuts">
+              <div class="welcome-shortcut">
+                <span class="welcome-shortcut-key">Ctrl S</span>
+                <span class="welcome-shortcut-desc">Save file</span>
+              </div>
+              <div class="welcome-shortcut">
+                <span class="welcome-shortcut-key">F5</span>
+                <span class="welcome-shortcut-desc">Run file</span>
+              </div>
+              <div class="welcome-shortcut">
+                <span class="welcome-shortcut-key">Ctrl `</span>
+                <span class="welcome-shortcut-desc">Toggle terminal</span>
+              </div>
+              <div class="welcome-shortcut">
+                <span class="welcome-shortcut-key">Ctrl L</span>
+                <span class="welcome-shortcut-desc">Clear terminal</span>
+              </div>
+            </div>
+
+          </div>
+        </div>
+
         <div id="monaco-container" class="monaco-container"></div>
       </div>
     </section>
@@ -262,80 +322,113 @@
     <span class="status-item status-right">Collaborative Code Editor</span>
   </footer>
 
-  <!-- Collaboration modal (UI only, no logic) -->
+  <!-- Collaboration modal -->
   <div class="collab-modal-backdrop collab-modal-hidden" role="presentation" aria-hidden="true">
     <div class="collab-modal" role="dialog" aria-modal="true" aria-labelledby="collab-modal-title">
-      <header class="collab-modal-header">
-        <div class="collab-modal-title-group">
-          <h2 class="collab-modal-title" id="collab-modal-title">Collaboration Session</h2>
-          <p class="collab-modal-subtitle">Create a new session or join an existing room.</p>
-        </div>
-        <button type="button" class="collab-modal-close" aria-label="Close collaboration dialog">
-          ×
-        </button>
-      </header>
 
-      <div class="collab-modal-body">
-        <div class="collab-mode-tabs" role="tablist" aria-label="Collaboration mode">
-          <button type="button" class="collab-mode-tab collab-mode-tab-active" role="tab" aria-selected="true"
-            data-mode="start">
+      <!-- Left panel: illustration + info -->
+      <div class="collab-modal-panel">
+        <div class="collab-modal-panel-icon">
+          <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round">
+            <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/>
+            <circle cx="9" cy="7" r="4"/>
+            <path d="M23 21v-2a4 4 0 0 0-3-3.87"/>
+            <path d="M16 3.13a4 4 0 0 1 0 7.75"/>
+          </svg>
+        </div>
+        <h2 class="collab-modal-panel-title">Collaborate live</h2>
+        <p class="collab-modal-panel-body">Share your code editor in real time. Others can view or edit, with cursor presence and inline comments.</p>
+        <ul class="collab-modal-feature-list">
+          <li>
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><polyline points="20 6 9 17 4 12"/></svg>
+            Live cursor presence
+          </li>
+          <li>
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><polyline points="20 6 9 17 4 12"/></svg>
+            Host controls permissions
+          </li>
+          <li>
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><polyline points="20 6 9 17 4 12"/></svg>
+            Inline code comments
+          </li>
+          <li>
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><polyline points="20 6 9 17 4 12"/></svg>
+            Built-in room chat
+          </li>
+        </ul>
+      </div>
+
+      <!-- Right panel: form -->
+      <div class="collab-modal-form-panel">
+        <button type="button" class="collab-modal-close" aria-label="Close">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+        </button>
+
+        <!-- Mode tabs -->
+        <div class="collab-mode-tabs" role="tablist">
+          <button type="button" class="collab-mode-tab collab-mode-tab-active" role="tab" aria-selected="true" data-mode="start">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><polygon points="5 3 19 12 5 21 5 3"/></svg>
             Start
           </button>
           <button type="button" class="collab-mode-tab" role="tab" aria-selected="false" data-mode="join">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4"/><polyline points="10 17 15 12 10 7"/><line x1="15" y1="12" x2="3" y2="12"/></svg>
             Join
           </button>
         </div>
 
         <form class="collab-form" novalidate>
+
+          <!-- START section -->
           <div class="collab-form-section collab-form-section-start" data-mode-section="start">
             <div class="collab-field">
-              <label class="collab-label" for="collab-display-name-start">Display name</label>
-              <input id="collab-display-name-start" class="collab-input" type="text" name="displayNameStart"
-                placeholder="How others will see you" autocomplete="off" />
+              <label class="collab-label" for="collab-display-name-start">Your display name</label>
+              <input id="collab-display-name-start" class="collab-input" type="text"
+                name="displayNameStart" placeholder="How others will see you" autocomplete="off" />
             </div>
-
             <div class="collab-field">
-              <label class="collab-label" for="collab-room-name">Room name (optional)</label>
-              <input id="collab-room-name" class="collab-input" type="text" name="roomName"
-                placeholder="e.g. feature-auth, pairing-session" autocomplete="off" />
+              <label class="collab-label" for="collab-room-name">Room name <span class="collab-label-optional">optional</span></label>
+              <input id="collab-room-name" class="collab-input" type="text"
+                name="roomName" placeholder="e.g. feature-auth, pairing-session" autocomplete="off" />
             </div>
-
-            <div class="collab-hint">
-              A shareable room ID will be generated when you start a session.
+            <div class="collab-hint-box">
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+              A shareable 8-character room ID is generated when you start. Share it with anyone you want to invite.
             </div>
           </div>
 
+          <!-- JOIN section -->
           <div class="collab-form-section collab-form-section-join" data-mode-section="join">
             <div class="collab-field">
-              <label class="collab-label" for="collab-display-name-join">Display name</label>
-              <input id="collab-display-name-join" class="collab-input" type="text" name="displayNameJoin"
-                placeholder="How others will see you" autocomplete="off" />
+              <label class="collab-label" for="collab-display-name-join">Your display name</label>
+              <input id="collab-display-name-join" class="collab-input" type="text"
+                name="displayNameJoin" placeholder="How others will see you" autocomplete="off" />
             </div>
-
             <div class="collab-field">
               <label class="collab-label" for="collab-room-id">Room ID</label>
-              <input id="collab-room-id" class="collab-input" type="text" name="roomId"
-                placeholder="Paste an existing room ID" autocomplete="off" />
+              <input id="collab-room-id" class="collab-input collab-input--mono" type="text"
+                name="roomId" placeholder="e.g. AB12XY34" autocomplete="off" maxlength="8" />
             </div>
-
-            <div class="collab-hint">
-              Ask the host for the room ID and paste it here to join their session.
+            <div class="collab-hint-box">
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+              Ask the session host for their room ID and paste it here to request access.
             </div>
           </div>
 
           <footer class="collab-modal-footer">
+            <button type="button" class="collab-secondary-action">Cancel</button>
             <button type="button" class="collab-primary-action" data-action="start">
-              Start Collaboration
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><polygon points="5 3 19 12 5 21 5 3"/></svg>
+              Start Session
             </button>
             <button type="button" class="collab-primary-action collab-primary-action-join" data-action="join">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4"/><polyline points="10 17 15 12 10 7"/><line x1="15" y1="12" x2="3" y2="12"/></svg>
               Join Room
             </button>
-            <button type="button" class="collab-secondary-action">
-              Cancel
-            </button>
           </footer>
+
         </form>
       </div>
+
     </div>
   </div>
 

@@ -10,6 +10,15 @@ function setEditorContent(content, language) {
       if (model) monaco.editor.setModelLanguage(model, language);
     }
   }
+  // Show/hide welcome screen based on whether content is present
+  const ws = document.getElementById('welcome-screen');
+  if (ws) {
+    if (content && content.trim().length > 0) {
+      ws.classList.add('hidden');
+    } else {
+      ws.classList.remove('hidden');
+    }
+  }
 }
 
 function getLanguageFromPath(filePath) {
@@ -1605,7 +1614,67 @@ function initApp() {
 
   wireToolbar();
 
-  // Hook into collab state changes to update toolbar
+  // ─── Welcome Screen ────────────────────────────────────────────────────────
+
+  const welcomeScreen = document.getElementById('welcome-screen');
+
+  function hideWelcomeScreen() {
+    if (welcomeScreen) welcomeScreen.classList.add('hidden');
+  }
+
+  function showWelcomeScreen() {
+    if (welcomeScreen) welcomeScreen.classList.remove('hidden');
+  }
+
+  // Populate recent projects on the welcome screen
+  function renderWelcomeRecents(paths) {
+    const container = document.getElementById('welcome-recents');
+    const list = document.getElementById('welcome-recents-list');
+    if (!container || !list || !paths || !paths.length) {
+      if (container) container.hidden = true;
+      return;
+    }
+    container.hidden = false;
+    list.innerHTML = '';
+    paths.slice(0, 5).forEach(folderPath => {
+      const name = folderPath.replace(/^.*[/\\]/, '') || folderPath;
+      const item = document.createElement('div');
+      item.className = 'welcome-recent-item';
+      item.innerHTML = `
+        <div class="welcome-recent-icon">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>
+        </div>
+        <div style="min-width:0;flex:1">
+          <div class="welcome-recent-name">${name}</div>
+          <div class="welcome-recent-path">${folderPath}</div>
+        </div>`;
+      item.addEventListener('click', async () => {
+        const result = await window.editorAPI.openRecentProject(folderPath);
+        if (result.error) { showStatus(result.error, true); return; }
+        currentFolderRoot = result.tree.path;
+        setExplorerTreeFromBackendTree(result.tree);
+        renderRecentProjects(await window.editorAPI.getRecentProjects());
+        hideWelcomeScreen();
+      });
+      list.appendChild(item);
+    });
+  }
+
+  // Wire welcome screen buttons
+  document.getElementById('ws-open-folder')?.addEventListener('click', () =>
+    document.getElementById('tb-open-folder')?.click());
+  document.getElementById('ws-open-file')?.addEventListener('click', () =>
+    document.getElementById('tb-open-file')?.click());
+  document.getElementById('ws-collab-start')?.addEventListener('click', () =>
+    document.getElementById('tb-collab-start')?.click());
+  document.getElementById('ws-collab-join')?.addEventListener('click', () =>
+    document.getElementById('tb-collab-join')?.click());
+
+  // Load recent projects into welcome screen
+  (async () => {
+    const recents = await window.editorAPI.getRecentProjects();
+    renderWelcomeRecents(recents);
+  })();
   const _origNotify = notifyCollabStateChange;
   function notifyCollabStateChange() {
     _origNotify && _origNotify();
@@ -1886,7 +1955,9 @@ function initApp() {
   });
 
   (async function loadRecentProjects() {
-    renderRecentProjects(await window.editorAPI.getRecentProjects());
+    const recents = await window.editorAPI.getRecentProjects();
+    renderRecentProjects(recents);
+    renderWelcomeRecents(recents);
   })();
 
   const terminalOutput = document.getElementById('terminal-output');
@@ -2095,6 +2166,7 @@ function initApp() {
           currentTab.dataset.filePath = '';
           setActiveFile('');
           showStatus('File closed');
+          // welcome screen auto-shows via setEditorContent('')
           break;
         }
         case 'run-file': {
