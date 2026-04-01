@@ -424,6 +424,10 @@ body {
   text-align: center;
 }
 
+.folder-tree-empty[hidden] {
+  display: none;
+}
+
 .folder-tree-empty-icon {
   width: 36px;
   height: 36px;
@@ -663,6 +667,32 @@ body {
 
 .code-editor::placeholder {
   color: #6a6a6a;
+}
+
+/* Window control buttons (frameless mode) */
+.win-btn {
+  width: 28px;
+  height: 28px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: none;
+  border-radius: 5px;
+  background: transparent;
+  color: #3d4a5c;
+  cursor: pointer;
+  transition: background 0.12s, color 0.12s;
+  -webkit-app-region: no-drag;
+}
+
+.win-btn:hover {
+  background: #252525;
+  color: #9ca3af;
+}
+
+.win-btn--close:hover {
+  background: #c0392b;
+  color: #ffffff;
 }
 
 /* Run button pulse animation */

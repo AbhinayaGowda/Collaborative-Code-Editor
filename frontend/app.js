@@ -1464,6 +1464,11 @@ function initApp() {
     const tbToggleTerm  = document.getElementById('tb-toggle-terminal');
     const tbToggleSide  = document.getElementById('tb-toggle-sidebar');
 
+    // Window controls (frameless)
+    document.getElementById('win-min')?.addEventListener('click', () => window.editorAPI.windowMinimize?.());
+    document.getElementById('win-max')?.addEventListener('click', () => window.editorAPI.windowMaximize?.());
+    document.getElementById('win-close')?.addEventListener('click', () => window.editorAPI.windowClose?.());
+
     // Sidebar header shortcuts
     const sbOpenFolder = document.getElementById('sb-open-folder');
     if (sbOpenFolder) sbOpenFolder.addEventListener('click', async () => {
@@ -1675,13 +1680,16 @@ function initApp() {
     const recents = await window.editorAPI.getRecentProjects();
     renderWelcomeRecents(recents);
   })();
-  const _origNotify = notifyCollabStateChange;
-  function notifyCollabStateChange() {
-    _origNotify && _origNotify();
+
+  // Patch notifyCollabStateChange to also update toolbar collab buttons
+  // Must use window assignment so it replaces the binding in this scope
+  const _origNotifyCollab = notifyCollabStateChange;
+  notifyCollabStateChange = function() {
+    _origNotifyCollab();
     if (window._updateToolbarCollabState) {
       window._updateToolbarCollabState(collabState.isActive);
     }
-  }
+  };
 
   // ─── File Tree & Editor Plumbing (unchanged from original) ─────────────────
 

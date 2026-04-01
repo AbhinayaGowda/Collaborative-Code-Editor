@@ -25,5 +25,8 @@ contextBridge.exposeInMainWorld('editorAPI', {
   notifyCollabState: (isActive) => ipcRenderer.send('collab-state-changed', isActive),
   onMenuCommand: (callback) => {
     ipcRenderer.on('menu-command', (_event, command) => callback(command));
-  }
+  },
+  windowMinimize: () => ipcRenderer.send('win-minimize'),
+  windowMaximize: () => ipcRenderer.send('win-maximize'),
+  windowClose:    () => ipcRenderer.send('win-close'),
 });

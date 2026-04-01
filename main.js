@@ -56,6 +56,8 @@ async function createWindow() {
   const win = new BrowserWindow({
     width: 1024,
     height: 768,
+    frame: false,
+    titleBarStyle: 'hidden',
     webPreferences: {
       contextIsolation: true,
       nodeIntegration: false,
@@ -108,6 +110,10 @@ async function createWindow() {
 
   win.loadURL(`http://127.0.0.1:${port}/frontend/index.html`);
 }
+
+ipcMain.on('win-minimize', () => { const w = BrowserWindow.getFocusedWindow(); if (w) w.minimize(); });
+ipcMain.on('win-maximize', () => { const w = BrowserWindow.getFocusedWindow(); if (w) w.isMaximized() ? w.unmaximize() : w.maximize(); });
+ipcMain.on('win-close',    () => { const w = BrowserWindow.getFocusedWindow(); if (w) w.close(); });
 
 ipcMain.on('collab-state-changed', (event, isActive) => {
   const menu = Menu.getApplicationMenu();
